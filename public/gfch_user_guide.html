@@ -357,36 +357,7 @@
       <li><strong>만료 상태 모니터링</strong>: 계약 만료일이 지난 문서에는 <strong>[⚠️ 기간 만료]</strong> 배지가 자동으로 활성화되어 갱신 시점을 직관적으로 알려줍니다.</li>
     </ul>
 
-    <h2>4. 구글 드라이브(GAS) 및 파이어베이스 연동 스펙</h2>
-    <p>본 ERP는 서버 스토리지 유지보수 비용을 0원으로 수렴시키기 위해, 본사의 기존 구글 드라이브 폴더를 API 파일 저장소로 적극 재활용하는 아키텍처로 구현되었습니다.</p>
-    
-    <div class="alert alert-important">
-      <div class="alert-title">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
-        중요: 파일 업로드 프로세스
-      </div>
-      프론트엔드에서 업로드한 파일을 <code>Base64</code> 문자열로 인코딩한 뒤, 본사가 승인한 <strong>Google Apps Script(GAS) Web App 엔드포인트</strong>로 POST 전송하면, GAS가 구글 드라이브 폴더에 파일을 생성한 후 공유 링크(View Link)를 리턴하여 Firestore DB에 저장합니다.
-    </div>
-
-    <pre><code>// GAS 구글 드라이브 업로드 엔드포인트 예시 코드
-function doPost(e) {
-  var data = JSON.parse(e.postData.contents);
-  if (data.apiKey !== "gfch_secret_upload_key_2026") {
-    return ContentService.createTextOutput(JSON.stringify({ status: "error" }));
-  }
-  var folder = DriveApp.getFolderById("1CnbxnRIKWvW6K-gOzkUBE0cYMuYeZ2hP");
-  var decoded = Utilities.base64Decode(data.base64Data);
-  var blob = Utilities.newBlob(decoded, data.contentType, data.filename);
-  var file = folder.createFile(blob);
-  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-  
-  return ContentService.createTextOutput(JSON.stringify({
-    status: "success",
-    fileUrl: file.getUrl()
-  })).setMimeType(ContentService.MimeType.JSON);
-}</code></pre>
-
-    <h2>5. 배포 및 유지보수 가이드</h2>
+    <h2>4. 배포 및 유지보수 가이드</h2>
     <p>본 프로젝트는 <strong>GitHub 저장소</strong>와 <strong>Vercel Cloud Platform</strong>이 자동 CI/CD 파이프라인으로 연결되어 개발자가 코드를 Push할 때마다 100% 자동으로 빌드와 무중단 배포가 수행됩니다.</p>
     
     <ul>
