@@ -1,0 +1,191 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// -------------------------------------
+// 1. Enums (기준 상태값)
+// -------------------------------------
+enum Role {
+  SUPER_ADMIN
+  HQ_SALES
+  HQ_PURCHASING
+  HQ_FINANCE
+  HQ_SUPPORT
+  MF_ADMIN
+  MF_USER
+  VENDOR_ADMIN
+  VENDOR_USER
+}
+
+enum CompanyType {
+  HQ
+  MF
+  VENDOR
+}
+
+enum OrderStatus {
+  DRAFT
+  PENDING_HQ_APPROVAL
+  HQ_APPROVED
+  SENT_TO_VENDOR
+  VENDOR_CONFIRMED
+  SHIPPED
+  DELIVERED
+  COMPLETED
+  CANCELLED
+}
+
+enum ContractStatus {
+  ACTIVE
+  WARNING
+  DELAYED
+  EXPIRING_SOON
+  EXPIRED
+}
+
+// -------------------------------------
+// 2. Models
+// -------------------------------------
+
+model Company {
+  id             String         @id @default(uuid())
+  type           CompanyType
+  name           String
+  country        String?
+  contractStatus ContractStatus @default(ACTIVE)
+  royaltyRate    Float?         // MF인 경우 로열티율 (%)
+  contractStart  DateTime?
+  contractEnd    DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  users              User[]
+  ordersAsMf         Order[]            @relation("MfOrders")
+  ordersAsVendor     Order[]            @relation("VendorOrders")
+  salesReports       SalesReport[]
+  royaltyStatements  RoyaltyStatement[]
+}
+
+model User {
+  id         String   @id @default(uuid())
+  companyId  String
+  role       Role
+  email      String   @unique
+  name       String
+  department String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  company    Company  @relation(fields: [companyId], references: [id])
+  auditLogs  AuditLog[]
+}
+
+model Product {
+  id          String   @id @default(uuid())
+  sku         String   @unique
+  name        String
+  category    String
+  cost        Decimal
+  price       Decimal
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  orderItems  OrderItem[]
+}
+
+model Order {
+  id            String      @id @default(uuid())
+  orderNo       String      @unique
+  mfId          String
+  vendorId      String?
+  status        OrderStatus @default(DRAFT)
+  currency      String      @default("USD")
+  totalAmount   Decimal
+  incoterms     String?
+  shippingInfo  String?
+  notes         String?
+  expectedDate  DateTime?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  mf            Company       @relation("MfOrders", fields: [mfId], references: [id])
+  vendor        Company?      @relation("VendorOrders", fields: [vendorId], references: [id])
+  orderItems    OrderItem[]
+  documents     Document[]
+}
+
+model OrderItem {
+  id         String  @id @default(uuid())
+  orderId    String
+  productId  String
+  sku        String
+  qty        Int
+  unitPrice  Decimal
+
+  order      Order   @relation(fields: [orderId], references: [id])
+  product    Product @relation(fields: [productId], references: [id])
+}
+
+model SalesReport {
+  id          String   @id @default(uuid())
+  mfId        String
+  month       String
+  grossSales  Decimal
+  netSales    Decimal
+  status      String   @default("PENDING_VERIFICATION")
+  createdAt   DateTime @default(now())
+
+  mf          Company  @relation(fields: [mfId], references: [id])
+}
+
+model RoyaltyStatement {
+  id          String   @id @default(uuid())
+  mfId        String
+  month       String
+  amountDue   Decimal
+  status      String   @default("UNPAID")
+  dueDate     DateTime
+  createdAt   DateTime @default(now())
+
+  mf          Company  @relation(fields: [mfId], references: [id])
+}
+
+model Document {
+  id           String   @id @default(uuid())
+  relatedType  String
+  relatedId    String
+  fileUrl      String
+  fileName     String
+  fileType     String
+  version      Int      @default(1)
+  createdAt    DateTime @default(now())
+
+  order        Order?   @relation(fields: [relatedId], references: [id], map: "OrderDoc_fk")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String
+  action     String
+  entityType String
+  entityId   String
+  before     Json?
+  after      Json?
+  timestamp  DateTime @default(now())
+
+  user       User     @relation(fields: [userId], references: [id])
+}
+
+model Comment {
+  id          String   @id @default(uuid())
+  entityType  String
+  entityId    String
+  userId      String
+  content     String
+  createdAt   DateTime @default(now())
+}
