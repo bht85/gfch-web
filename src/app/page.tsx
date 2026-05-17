@@ -91,7 +91,7 @@ export default function Dashboard() {
     } else {
       q = query(
         collection(db, "orders"),
-        where("partnerId", "==", user.id)
+        where("partnerId", "==", user.role)
       );
     }
 

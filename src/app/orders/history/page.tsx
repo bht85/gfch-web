@@ -41,7 +41,7 @@ export default function OrderHistoryPage() {
   const isHQ = user?.role === "HQ";
   const WORKFLOW_STAGES = getWorkflowStages(t);
 
-  const [selectedPartner, setSelectedPartner] = useState(isHQ ? MOCK_PARTNERS[0].id : user?.id || "");
+  const [selectedPartner, setSelectedPartner] = useState(isHQ ? MOCK_PARTNERS[0].id : user?.role || "");
   const [orders, setOrders] = useState<any[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
   const [uploadingDoc, setUploadingDoc] = useState<string | null>(null);
@@ -50,7 +50,7 @@ export default function OrderHistoryPage() {
 
   useEffect(() => {
     if (user && !isHQ) {
-      setSelectedPartner(user.id);
+      setSelectedPartner(user.role);
     }
   }, [user, isHQ]);
 

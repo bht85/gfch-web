@@ -30,7 +30,7 @@ export default function PurchaseLedgerPage() {
   const { t, lang } = useTranslation();
   const isHQ = user?.role === "HQ";
   
-  const [selectedPartner, setSelectedPartner] = useState(isHQ ? MOCK_PARTNERS[0].id : user?.id || "");
+  const [selectedPartner, setSelectedPartner] = useState(isHQ ? MOCK_PARTNERS[0].id : user?.role || "");
   const [orders, setOrders] = useState<any[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
   
@@ -39,7 +39,7 @@ export default function PurchaseLedgerPage() {
 
   useEffect(() => {
     if (user && !isHQ) {
-      setSelectedPartner(user.id);
+      setSelectedPartner(user.role);
     }
   }, [user, isHQ]);
 

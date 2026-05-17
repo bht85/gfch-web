@@ -81,7 +81,7 @@ export default function PlaceOrderPage() {
   const currentPartner = isHQ 
     ? (MOCK_PARTNERS.find(p => p.id === selectedPartnerId) || MOCK_PARTNERS[1])
     : {
-        id: user?.uid || "MF-02",
+        id: user?.role || "MF-02",
         name: user?.name || "Vietnam Food Corp",
         code: user?.partnerCode || "VNM"
       };

@@ -101,7 +101,7 @@ export default function ShippingPage() {
       // MF는 본인 데이터만 조회
       q = query(
         collection(db, "orders"), 
-        where("partnerId", "==", user.id),
+        where("partnerId", "==", user.role),
         where("status", "in", SHIPPING_TARGET_STATUS)
       );
     }
