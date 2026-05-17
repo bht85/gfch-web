@@ -219,7 +219,7 @@ export default function SalesManagementPage() {
                   <YAxis axisLine={false} tickLine={false} tickFormatter={(value) => `$${value/1000}k`} tickMargin={8} tick={{fontSize: 10}} />
                   <Tooltip 
                     cursor={{fill: 'rgba(0,0,0,0.05)'}}
-                    formatter={(value: number, name: string) => [`$${value.toLocaleString()}`, name]}
+                    formatter={(value: any, name: any) => [`$${Number(value).toLocaleString()}`, name]}
                     contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '12px' }}
                   />
                   <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '12px' }} />
