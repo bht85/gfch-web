@@ -447,6 +447,33 @@ export default function DocumentsPage() {
         </Table>
       </div>
 
+      {/* 📘 GFCH 사용자 가이드 안내 카드 */}
+      <div className="mt-8 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-100 rounded-xl p-6 flex flex-col md:flex-row items-center justify-between gap-4 shadow-sm">
+        <div className="flex items-start gap-4">
+          <div className="p-3 bg-blue-500/10 text-blue-600 rounded-lg shrink-0">
+            <FileText className="w-6 h-6" />
+          </div>
+          <div>
+            <h4 className="font-bold text-sm text-slate-900">
+              {lang === "KO" ? "📘 GFCH 통합 사용자 및 아키텍처 가이드북" : "📘 GFCH Integrated User & Architecture Guidebook"}
+            </h4>
+            <p className="text-xs text-muted-foreground mt-1 max-w-[550px] leading-relaxed">
+              {lang === "KO" 
+                ? "해외사업팀 전용 ERP 플랫폼(GFCH)의 각 화면 사용법, 정산 공식, 파이어베이스 및 구글 드라이브 연동 구조를 설명하는 종합 가이드북입니다. 인쇄 또는 PDF 저장이 가능한 형태로 최적화되어 있습니다." 
+                : "Comprehensive guidebook explaining ERP usage, margins, and GAS integration. Optimized for print or direct PDF export."}
+            </p>
+          </div>
+        </div>
+        <Button 
+          variant="outline"
+          className="border-blue-200 hover:border-blue-300 hover:bg-blue-500/5 text-blue-700 font-bold shrink-0 shadow-sm"
+          onClick={() => window.open("/gfch_user_guide.html", "_blank")}
+        >
+          <Download className="w-4 h-4 mr-2" />
+          {lang === "KO" ? "가이드 열기 / PDF 저장" : "Open Guide / Save PDF"}
+        </Button>
+      </div>
+
       {/* 🔒 새 문서 업로드 등록 모달 */}
       <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
         <DialogContent className="sm:max-w-[500px]">
