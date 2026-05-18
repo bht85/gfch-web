@@ -10,28 +10,46 @@ import { Badge } from "@/components/ui/badge";
 import { db } from "@/lib/firebase";
 import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
 
-const MOCK_PARTNERS = [
-  { id: "MF-01", name: "Japan Master Franchise" },
-  { id: "MF-02", name: "Vietnam Food Corp" },
-  { id: "MF-03", name: "Thailand Synergy" },
-];
-
 export default function PricingPage() {
-  const [selectedPartner, setSelectedPartner] = useState(MOCK_PARTNERS[0].id);
+  const [dbPartners, setDbPartners] = useState<any[]>([]);
+  const [selectedPartner, setSelectedPartner] = useState("");
   const [partnerPrices, setPartnerPrices] = useState<Record<string, Record<string, number>>>({});
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Firestore에서 파트너사 목록 로드
   useEffect(() => {
+    const q = query(collection(db, "partners"), orderBy("name", "asc"));
+    const unsubscribe = onSnapshot(q, (snapshot: any) => {
+      const list = snapshot.docs.map((doc: any) => ({
+        id: doc.id,
+        name: doc.data().name || "Unknown Partner",
+        code: doc.data().code || doc.data().country || "MF",
+        ...doc.data()
+      }) as any);
+      setDbPartners(list);
+      if (list.length > 0 && !selectedPartner) {
+        // 기본값: JPN 파트너 또는 첫 번째 파트너
+        const jpnPartner = list.find((p: any) => p.code === "JPN" || p.id === "MF-01");
+        setSelectedPartner(jpnPartner ? jpnPartner.id : list[0].id);
+      }
+    });
+    return () => unsubscribe();
+  }, [selectedPartner]);
+
+  // Firestore에서 상품 목록 로드 및 초기 판매가 매핑
+  useEffect(() => {
+    if (dbPartners.length === 0) return;
+
     const q = query(collection(db, "products"), orderBy("name", "asc"));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setProducts(data);
-      
+
       // 초기 가격 설정 (DB의 price 속성 또는 cost + 20% 마진을 기본값으로 사용)
       setPartnerPrices(prev => {
         const initial: Record<string, Record<string, number>> = { ...prev };
-        MOCK_PARTNERS.forEach(p => {
+        dbPartners.forEach(p => {
           if (!initial[p.id]) initial[p.id] = {};
           data.forEach(prod => {
             const prodData = prod as any;
@@ -42,11 +60,11 @@ export default function PricingPage() {
         });
         return initial;
       });
-      
+
       setLoading(false);
     });
     return () => unsubscribe();
-  }, []);
+  }, [dbPartners]);
 
   const handlePriceChange = (productId: string, value: string) => {
     const newPrice = parseFloat(value) || 0;
@@ -77,18 +95,18 @@ export default function PricingPage() {
         <div className="flex items-center gap-4">
           <div className="space-y-1.5 flex-1">
             <label className="text-sm font-medium">대상 파트너사 선택</label>
-            <select 
+            <select
               className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
               value={selectedPartner}
               onChange={(e) => setSelectedPartner(e.target.value)}
             >
-              {MOCK_PARTNERS.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              {dbPartners.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           </div>
           <div className="bg-blue-50 border border-blue-100 p-3 rounded-md flex gap-2 text-blue-800 text-sm flex-[1.5]">
             <Info className="h-4 w-4 shrink-0 mt-0.5" />
             <p>
-              <strong>개별 가격 관리:</strong> 현재 선택된 **{MOCK_PARTNERS.find(p => p.id === selectedPartner)?.name}** 전용 가격입니다. 
+              <strong>개별 가격 관리:</strong> 현재 선택된 **{dbPartners.find(p => p.id === selectedPartner)?.name || "로딩 중..."}** 전용 가격입니다.
               파트너사를 변경하면 해당 국가에 설정된 가격으로 화면이 전환됩니다.
             </p>
           </div>
@@ -131,8 +149,8 @@ export default function PricingPage() {
                   <TableCell>
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-semibold">$</span>
-                      <Input 
-                        type="number" 
+                      <Input
+                        type="number"
                         value={sellingPrice}
                         onChange={(e) => handlePriceChange(product.id, e.target.value)}
                         className="w-full h-9 font-medium border-primary/20 focus:border-primary"

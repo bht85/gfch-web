@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { db } from "@/lib/firebase";
-import { collection, onSnapshot, doc, updateDoc, query, where, deleteField, addDoc } from "firebase/firestore";
+import { collection, onSnapshot, doc, updateDoc, query, where, deleteField, addDoc, orderBy } from "firebase/firestore";
 import { useAuth } from "@/lib/auth";
 import { useTranslation } from "@/lib/i18n";
 
@@ -30,23 +30,39 @@ const getWorkflowStages = (t: any) => [
   { id: "COMPLETED", label: t("completed"), color: "bg-green-100 text-green-700 border-green-200", icon: CheckCircle2 },
 ];
 
-const MOCK_PARTNERS = [
-  { id: "MF-01", name: "Japan Master Franchise" },
-  { id: "MF-02", name: "Vietnam Food Corp" },
-];
-
 export default function OrderHistoryPage() {
   const { user } = useAuth();
   const { t, lang } = useTranslation();
   const isHQ = user?.role === "HQ";
   const WORKFLOW_STAGES = getWorkflowStages(t);
 
-  const [selectedPartner, setSelectedPartner] = useState(isHQ ? MOCK_PARTNERS[0].id : user?.role || "");
+  const [dbPartners, setDbPartners] = useState<any[]>([]);
+  const [selectedPartner, setSelectedPartner] = useState("");
   const [orders, setOrders] = useState<any[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
   const [uploadingDoc, setUploadingDoc] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{key: string, idx: number} | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // Firestore에서 파트너사 목록 로드
+  useEffect(() => {
+    const q = query(collection(db, "partners"), orderBy("name", "asc"));
+    const unsubscribe = onSnapshot(q, (snapshot: any) => {
+      const list = snapshot.docs.map((doc: any) => ({
+        id: doc.id,
+        name: doc.data().name || "Unknown Partner",
+        code: doc.data().code || doc.data().country || "MF",
+        ...doc.data()
+      }) as any);
+      setDbPartners(list);
+      if (isHQ && list.length > 0 && !selectedPartner) {
+        // 기본값: JPN 파트너 또는 첫 번째 파트너
+        const jpnPartner = list.find((p: any) => p.code === "JPN" || p.id === "MF-01");
+        setSelectedPartner(jpnPartner ? jpnPartner.id : list[0].id);
+      }
+    });
+    return () => unsubscribe();
+  }, [isHQ, selectedPartner]);
 
   useEffect(() => {
     if (user && !isHQ) {
@@ -321,7 +337,7 @@ export default function OrderHistoryPage() {
                 value={selectedPartner}
                 onChange={(e) => setSelectedPartner(e.target.value)}
               >
-                {MOCK_PARTNERS.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                {dbPartners.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
             </div>
           )}

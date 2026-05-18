@@ -20,22 +20,38 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-const MOCK_PARTNERS = [
-  { id: "MF-01", name: "Japan Master Franchise" },
-  { id: "MF-02", name: "Vietnam Food Corp" },
-];
-
 export default function PurchaseLedgerPage() {
   const { user } = useAuth();
   const { t, lang } = useTranslation();
   const isHQ = user?.role === "HQ";
   
-  const [selectedPartner, setSelectedPartner] = useState(isHQ ? MOCK_PARTNERS[0].id : user?.role || "");
+  const [dbPartners, setDbPartners] = useState<any[]>([]);
+  const [selectedPartner, setSelectedPartner] = useState("");
   const [orders, setOrders] = useState<any[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
   
   const [startDate, setStartDate] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
+
+  // Firestore에서 파트너사 목록 로드
+  useEffect(() => {
+    const q = query(collection(db, "partners"), orderBy("name", "asc"));
+    const unsubscribe = onSnapshot(q, (snapshot: any) => {
+      const list = snapshot.docs.map((doc: any) => ({
+        id: doc.id,
+        name: doc.data().name || "Unknown Partner",
+        code: doc.data().code || doc.data().country || "MF",
+        ...doc.data()
+      }) as any);
+      setDbPartners(list);
+      if (isHQ && list.length > 0 && !selectedPartner) {
+        // 기본값: JPN 파트너 또는 첫 번째 파트너
+        const jpnPartner = list.find((p: any) => p.code === "JPN" || p.id === "MF-01");
+        setSelectedPartner(jpnPartner ? jpnPartner.id : list[0].id);
+      }
+    });
+    return () => unsubscribe();
+  }, [isHQ, selectedPartner]);
 
   useEffect(() => {
     if (user && !isHQ) {
@@ -115,7 +131,7 @@ export default function PurchaseLedgerPage() {
                 value={selectedPartner}
                 onChange={(e) => setSelectedPartner(e.target.value)}
               >
-                {MOCK_PARTNERS.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                {dbPartners.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
             </div>
           </div>

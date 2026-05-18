@@ -11,7 +11,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { useTranslation } from "@/lib/i18n";
 import { db } from "@/lib/firebase";
-import { collection, getDocs, query, orderBy, setDoc, doc } from "firebase/firestore";
+import { collection, getDocs, query, orderBy, setDoc, doc, onSnapshot } from "firebase/firestore";
 
 interface Product {
   id: string;
@@ -21,12 +21,6 @@ interface Product {
   cost: number;
   price: number;
 }
-
-const MOCK_PARTNERS = [
-  { id: "MF-01", code: "JPN", name: "Japan Master Franchise" },
-  { id: "MF-02", code: "VNM", name: "Vietnam Food Corp" },
-  { id: "MF-03", code: "THA", name: "Thailand Synergy" }
-];
 
 export default function PlaceOrderPage() {
   const router = useRouter();
@@ -41,8 +35,30 @@ export default function PlaceOrderPage() {
   const [cart, setCart] = useState<Record<string, number>>({});
   const [isOrdered, setIsOrdered] = useState(false);
   
+  // Firestore에서 로드된 실시간 파트너 목록
+  const [dbPartners, setDbPartners] = useState<any[]>([]);
   // HQ(본사)일 경우 대리 발주할 대상 파트너 선택
-  const [selectedPartnerId, setSelectedPartnerId] = useState(MOCK_PARTNERS[1].id); // 기본값: 베트남
+  const [selectedPartnerId, setSelectedPartnerId] = useState("");
+
+  // Firestore에서 실제 파트너 목록 실시간 연동
+  useEffect(() => {
+    const q = query(collection(db, "partners"), orderBy("name", "asc"));
+    const unsubscribe = onSnapshot(q, (snapshot: any) => {
+      const list = snapshot.docs.map((doc: any) => ({
+        id: doc.id,
+        code: doc.data().code || doc.data().country || "MF",
+        name: doc.data().name || "Unknown Partner",
+        ...doc.data()
+      }) as any);
+      setDbPartners(list);
+      if (list.length > 0 && !selectedPartnerId) {
+        // 기본값 세팅: 베트남 푸드 또는 첫 번째 항목
+        const vnmPartner = list.find((p: any) => p.code === "VNM" || p.id === "MF-02");
+        setSelectedPartnerId(vnmPartner ? vnmPartner.id : list[0].id);
+      }
+    });
+    return () => unsubscribe();
+  }, [selectedPartnerId]);
 
   // 1. Firestore에서 실제 상품 마스터 목록 실시간 조회
   useEffect(() => {
@@ -79,7 +95,7 @@ export default function PlaceOrderPage() {
 
   // 파트너 정보 식별 (HQ 대리 발주 vs 일반 파트너 직접 발주)
   const currentPartner = isHQ 
-    ? (MOCK_PARTNERS.find(p => p.id === selectedPartnerId) || MOCK_PARTNERS[1])
+    ? (dbPartners.find(p => p.id === selectedPartnerId) || dbPartners[0] || { id: "", name: "", code: "" })
     : {
         id: user?.role || "MF-02",
         name: user?.name || "Vietnam Food Corp",
@@ -236,7 +252,7 @@ export default function PlaceOrderPage() {
                       setCart({}); // 파트너 변경 시 장바구니 리셋
                     }}
                   >
-                    {MOCK_PARTNERS.map(p => (
+                    {dbPartners.map(p => (
                       <option key={p.id} value={p.id}>{p.name} ({p.code})</option>
                     ))}
                   </select>
