@@ -23,7 +23,7 @@ import {
 import { useAuth } from "@/lib/auth";
 import Link from "next/link";
 import { db } from "@/lib/firebase";
-import { doc, onSnapshot, setDoc, collection, query, where, orderBy } from "firebase/firestore";
+import { doc, onSnapshot, setDoc, collection, query, where, orderBy, getDoc, addDoc } from "firebase/firestore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -55,6 +55,8 @@ export default function Dashboard() {
   const [editTitle, setEditTitle] = useState("");
   const [editContent, setEditContent] = useState("");
   const [savingAnnouncement, setSavingAnnouncement] = useState(false);
+
+
 
   // 실시간 주문 데이터 바인딩 상태
   const [orders, setOrders] = useState<any[]>([]);
@@ -442,8 +444,8 @@ export default function Dashboard() {
           </div>
         </div>
       </Card>
-      
-      {/* 실시간 파트너 Aggregations (예산 제거, 실제 데이터 반영) */}
+
+
       <div className="grid gap-4 md:grid-cols-3">
         <Card className="border-l-4 border-l-blue-500 shadow-sm hover:shadow-md transition-all">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -626,6 +628,7 @@ export default function Dashboard() {
             </div>
           </CardContent>
         </Card>
+
       </div>
     </div>
   );

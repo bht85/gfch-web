@@ -36,7 +36,15 @@ export function Sidebar() {
             </li>
           )}
 
-          <li className="pt-2">
+          {/* 🪙 로열티 정산 센터 (본사 & 파트너 공통 메뉴) */}
+          <li>
+            <Link href="/royalty" className="flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground hover:text-primary hover:bg-muted transition-all">
+              <ClipboardList className="h-5 w-5 text-indigo-500" />
+              <span className="font-medium">{t("royalty")}</span>
+            </Link>
+          </li>
+
+          <li>
             <button 
               onClick={() => setIsOrdersOpen(!isOrdersOpen)}
               className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-muted-foreground hover:text-primary hover:bg-muted transition-all"
@@ -77,13 +85,13 @@ export function Sidebar() {
             <>
               <li>
                 <Link href="/sales" className="flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground hover:text-primary hover:bg-muted transition-all">
-                  <DollarSign className="h-5 w-5" />
-                  <span className="font-medium">{lang === "KO" ? "MF별 매출 및 로열티" : "MF Sales & Royalty"}</span>
+                  <DollarSign className="h-5 w-5 text-emerald-500" />
+                  <span className="font-medium">{lang === "KO" ? "MF별 손익 분석" : "MF P&L Analysis"}</span>
                 </Link>
               </li>
               <li>
                 <Link href="/documents" className="flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground hover:text-primary hover:bg-muted transition-all">
-                  <FileText className="h-5 w-5" />
+                  <FileText className="h-5 w-5 text-blue-500" />
                   <span className="font-medium">{t("documents")}</span>
                 </Link>
               </li>

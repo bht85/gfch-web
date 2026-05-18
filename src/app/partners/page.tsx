@@ -36,7 +36,7 @@ export default function PartnersPage() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
   
-  const [newPartner, setNewPartner] = useState({ name: "", country: "", type: "MF", startDate: "", endDate: "", contacts: [] });
+  const [newPartner, setNewPartner] = useState({ name: "", country: "", type: "MF", startDate: "", endDate: "", contacts: [], royaltyRate: 3.5 });
   const [editingPartner, setEditingPartner] = useState<any>(null);
   const [newContact, setNewContact] = useState({ name: "", email: "", role: "" });
   
@@ -114,7 +114,7 @@ export default function PartnersPage() {
     if (!newPartner.name || !newPartner.country) return;
     try {
       await addDoc(collection(db, "partners"), newPartner);
-      setNewPartner({ name: "", country: "", type: "MF", startDate: "", endDate: "", contacts: [] });
+      setNewPartner({ name: "", country: "", type: "MF", startDate: "", endDate: "", contacts: [], royaltyRate: 3.5 });
       setIsAddModalOpen(false);
     } catch (error) {
       alert("Error adding partner");
@@ -375,6 +375,10 @@ export default function PartnersPage() {
                   <Input id="endDate" type="date" value={newPartner.endDate || ""} onChange={(e) => setNewPartner({ ...newPartner, endDate: e.target.value })} />
                 </div>
               </div>
+              <div className="grid gap-2">
+                <Label htmlFor="royaltyRate">{lang === "KO" ? "로열티 요율 (%)" : "Royalty Rate (%)"}</Label>
+                <Input id="royaltyRate" type="number" step="0.1" placeholder="3.5" value={newPartner.royaltyRate} onChange={(e) => setNewPartner({ ...newPartner, royaltyRate: parseFloat(e.target.value) || 0 })} />
+              </div>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsAddModalOpen(false)}>{lang === "KO" ? "취소" : "Cancel"}</Button>
@@ -436,6 +440,25 @@ export default function PartnersPage() {
                   <TableRow className="bg-muted/30">
                     <TableCell colSpan={7} className="p-0">
                       <div className="px-12 py-4 space-y-4">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-background rounded-lg border text-xs shadow-sm">
+                          <div>
+                            <span className="text-muted-foreground block font-medium mb-1">{lang === "KO" ? "업체명" : "Company"}</span>
+                            <span className="font-bold text-slate-800">{partner.name}</span>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground block font-medium mb-1">{lang === "KO" ? "유형" : "Type"}</span>
+                            <span className="font-bold"><Badge variant="outline" className="text-[10px] py-0 px-1.5">{partner.type}</Badge></span>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground block font-medium mb-1">{lang === "KO" ? "계약 로열티 요율" : "Contract Royalty Rate"}</span>
+                            <span className="font-extrabold text-blue-600 text-sm">{partner.royaltyRate !== undefined ? partner.royaltyRate : 3.5}%</span>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground block font-medium mb-1">{lang === "KO" ? "유효 기간" : "Validity"}</span>
+                            <span className="font-bold text-slate-700">{partner.startDate || "N/A"} ~ {partner.endDate || (lang === "KO" ? "진행 중" : "Active")}</span>
+                          </div>
+                        </div>
+
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
                             <User className="h-4 w-4" />
@@ -536,6 +559,10 @@ export default function PartnersPage() {
                     <Label>{lang === "KO" ? "계약 종료/중단일" : "Contract End/Halt"}</Label>
                     <Input type="date" value={editingPartner.endDate || ""} onChange={(e) => setEditingPartner({ ...editingPartner, endDate: e.target.value })} />
                   </div>
+                </div>
+                <div className="grid gap-2">
+                  <Label>{lang === "KO" ? "로열티 요율 (%)" : "Royalty Rate (%)"}</Label>
+                  <Input type="number" step="0.1" value={editingPartner.royaltyRate !== undefined ? editingPartner.royaltyRate : 3.5} onChange={(e) => setEditingPartner({ ...editingPartner, royaltyRate: parseFloat(e.target.value) || 0 })} />
                 </div>
               </div>
 
