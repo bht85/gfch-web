@@ -42,11 +42,18 @@ export default function LoginPage() {
       router.push("/");
     } catch (err: any) {
       console.error(err);
+      let msg = "";
       if (err.code === "auth/invalid-credential" || err.code === "auth/user-not-found" || err.code === "auth/wrong-password") {
-        setErrorMsg(lang === "KO" ? "이메일 또는 비밀번호가 올바르지 않습니다." : "Invalid email or password.");
+        msg = lang === "KO" 
+          ? "비밀번호가 틀렸거나 등록되지 않은 이메일입니다. 다시 확인해 주세요!" 
+          : "Incorrect password or unregistered email. Please check and try again!";
       } else {
-        setErrorMsg(lang === "KO" ? "로그인 중 에러가 발생했습니다." : "An error occurred during login.");
+        msg = lang === "KO" 
+          ? "로그인 중 에러가 발생했습니다. 이메일과 비밀번호를 확인해 주세요." 
+          : "An error occurred during login. Please check your credentials.";
       }
+      setErrorMsg(msg);
+      alert(msg); // 🚨 Direct browser alert popup for clear notification
     } finally {
       setActionLoading(false);
     }
