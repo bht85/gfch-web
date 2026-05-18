@@ -5,7 +5,7 @@ import { useTranslation } from "@/lib/i18n";
 import { useRouter } from "next/navigation";
 import { useState, useEffect, Fragment } from "react";
 import { db } from "@/lib/firebase";
-import { collection, onSnapshot, doc, updateDoc, deleteDoc, addDoc, setDoc, query, orderBy } from "firebase/firestore";
+import { collection, onSnapshot, doc, updateDoc, deleteDoc, addDoc, setDoc, query, orderBy, getDoc } from "firebase/firestore";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -40,7 +40,7 @@ export default function PartnersPage() {
   const [editingPartner, setEditingPartner] = useState<any>(null);
   const [newContact, setNewContact] = useState({ name: "", email: "", role: "" });
   
-  const [newInvite, setNewInvite] = useState({ email: "", name: "", role: "MF-01", partnerCode: "" });
+  const [newInvite, setNewInvite] = useState({ email: "", name: "", role: "HQ", partnerCode: "" });
 
   // 보안 체크
   useEffect(() => {
@@ -86,7 +86,7 @@ export default function PartnersPage() {
         status: "PENDING",
         createdAt: new Date().toISOString()
       });
-      setNewInvite({ email: "", name: "", role: "MF-01", partnerCode: "" });
+      setNewInvite({ email: "", name: "", role: "HQ", partnerCode: "" });
       setIsInviteModalOpen(false);
       alert("가입 승인(초대) 메일이 등록되었습니다.");
     } catch (e) {
@@ -126,9 +126,30 @@ export default function PartnersPage() {
     try {
       const { id, ...data } = editingPartner;
       await updateDoc(doc(db, "partners", id), data);
+      
+      // 🔒 자동 초대 연동 (Phase 2)
+      if (data.contacts && Array.isArray(data.contacts)) {
+        for (const contact of data.contacts) {
+          if (!contact.email || !contact.name) continue;
+          const cleanEmail = contact.email.trim().toLowerCase();
+          const inviteRef = doc(db, "invites", cleanEmail);
+          const inviteDoc = await getDoc(inviteRef);
+          if (!inviteDoc.exists()) {
+            await setDoc(inviteRef, {
+              email: cleanEmail,
+              name: contact.name,
+              role: id, // 파트너사 Firestore 문서 ID를 유저의 권한 역할(SaaS 테넌트 ID)로 부여
+              partnerCode: data.country || "MF",
+              status: "PENDING",
+              createdAt: new Date().toISOString()
+            });
+          }
+        }
+      }
+      
       setIsEditModalOpen(false);
     } catch (error) {
-      alert("Error updating partner");
+      alert("Error updating partner: " + error);
     }
   };
 
@@ -213,11 +234,22 @@ export default function PartnersPage() {
                       id="invite-role"
                       className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
                       value={newInvite.role}
-                      onChange={(e) => setNewInvite({ ...newInvite, role: e.target.value })}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        const selectedPartner = partners.find(p => p.id === val);
+                        setNewInvite({
+                          ...newInvite,
+                          role: val,
+                          partnerCode: selectedPartner ? (selectedPartner.code || selectedPartner.country || "MF") : ""
+                        });
+                      }}
                     >
                       <option value="HQ">본사 관리자 (HQ Admin)</option>
-                      <option value="MF-01">Japan MF 파트너 (MF-01)</option>
-                      <option value="MF-02">Vietnam MF 파트너 (MF-02)</option>
+                      {partners.map((p: any) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} ({p.country}) - {p.type}
+                        </option>
+                      ))}
                     </select>
                   </div>
                   {newInvite.role !== "HQ" && (
@@ -414,18 +446,57 @@ export default function PartnersPage() {
                           </Button>
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                          {partner.contacts?.length > 0 ? partner.contacts.map((contact: any, idx: number) => (
-                            <div key={idx} className="bg-background rounded-lg border p-3 flex flex-col gap-1 shadow-sm">
-                              <div className="flex items-center justify-between">
-                                <span className="font-medium text-sm">{contact.name}</span>
-                                <Badge variant="secondary" className="text-[10px] h-4 px-1">{contact.role}</Badge>
+                          {partner.contacts?.length > 0 ? partner.contacts.map((contact: any, idx: number) => {
+                            const contactInvite = invites.find(inv => inv.email === contact.email.trim().toLowerCase());
+                            return (
+                              <div key={idx} className="bg-background rounded-lg border p-3 flex flex-col gap-1 shadow-sm">
+                                <div className="flex items-center justify-between">
+                                  <span className="font-medium text-sm">{contact.name}</span>
+                                  <Badge variant="secondary" className="text-[10px] h-4 px-1">{contact.role}</Badge>
+                                </div>
+                                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                  <Mail className="h-3 w-3" />
+                                  {contact.email}
+                                </div>
+                                
+                                <div className="flex items-center justify-between mt-2 pt-2 border-t text-[10px]">
+                                  <span className="text-muted-foreground font-semibold">초대 상태:</span>
+                                  {contactInvite ? (
+                                    contactInvite.status === "PENDING" ? (
+                                      <Badge variant="outline" className="text-amber-600 border-amber-300 bg-amber-50 text-[9px] px-1.5 py-0 h-4">
+                                        초대 대기
+                                      </Badge>
+                                    ) : (
+                                      <Badge variant="outline" className="text-green-600 border-green-300 bg-green-50 text-[9px] px-1.5 py-0 h-4">
+                                        가입 완료
+                                      </Badge>
+                                    )
+                                  ) : (
+                                    <button
+                                      onClick={async () => {
+                                        try {
+                                          await setDoc(doc(db, "invites", contact.email.trim().toLowerCase()), {
+                                            email: contact.email.trim().toLowerCase(),
+                                            name: contact.name,
+                                            role: partner.id,
+                                            partnerCode: partner.country || "MF",
+                                            status: "PENDING",
+                                            createdAt: new Date().toISOString()
+                                          });
+                                          alert("해당 담당자에게 가입 승인 권한(초대)이 즉시 부여되었습니다.");
+                                        } catch (e) {
+                                          alert("초대 실패: " + e);
+                                        }
+                                      }}
+                                      className="text-primary hover:underline font-bold text-[9px] flex items-center gap-1"
+                                    >
+                                      초대 등록하기
+                                    </button>
+                                  )}
+                                </div>
                               </div>
-                              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                                <Mail className="h-3 w-3" />
-                                {contact.email}
-                              </div>
-                            </div>
-                          )) : (
+                            );
+                          }) : (
                             <p className="text-xs text-muted-foreground italic">{lang === "KO" ? "등록된 담당자가 없습니다." : "No contacts registered."}</p>
                           )}
                         </div>

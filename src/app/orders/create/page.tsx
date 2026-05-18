@@ -102,6 +102,28 @@ export default function PlaceOrderPage() {
         code: user?.partnerCode || "VNM"
       };
 
+  // 🔒 파트너 전용 커스텀 판매가 정보 실시간 로드 (Phase 3)
+  const [customPrices, setCustomPrices] = useState<Record<string, number>>({});
+  useEffect(() => {
+    if (!currentPartner.id) return;
+    const priceDocRef = doc(db, "prices", currentPartner.id);
+    const unsubscribe = onSnapshot(priceDocRef, (docSnap: any) => {
+      if (docSnap.exists()) {
+        setCustomPrices(docSnap.data().prices || {});
+      } else {
+        setCustomPrices({});
+      }
+    });
+    return () => unsubscribe();
+  }, [currentPartner.id]);
+
+  const getProductPrice = (product: Product) => {
+    if (customPrices && customPrices[product.id] !== undefined) {
+      return customPrices[product.id];
+    }
+    return product.price || (product.cost ? product.cost * 1.2 : 0);
+  };
+
   // 수량 가감 처리
   const updateQuantity = (productId: string, delta: number) => {
     setCart(prev => {
@@ -123,7 +145,7 @@ export default function PlaceOrderPage() {
   // 합계 금액 계산
   const totalAmount = cartItems.reduce((sum, [id, qty]) => {
     const prod = products.find(p => p.id === id);
-    return sum + (prod?.price || 0) * qty;
+    return sum + (prod ? getProductPrice(prod) : 0) * qty;
   }, 0);
 
   // 2. 발주서 전송 (Firestore 실제 추가)
@@ -147,7 +169,7 @@ export default function PlaceOrderPage() {
         return {
           name: prod.name,
           qty: qty,
-          price: prod.price,
+          price: getProductPrice(prod),
           cost: prod.cost
         };
       });
@@ -307,7 +329,7 @@ export default function PlaceOrderPage() {
                           </div>
                         </TableCell>
                         <TableCell className="font-mono font-bold text-foreground text-sm">
-                          ${product.price.toFixed(2)}
+                          ${getProductPrice(product).toFixed(2)}
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center justify-center gap-3">
@@ -360,7 +382,7 @@ export default function PlaceOrderPage() {
               ) : (
                 cartItems.map(([id, qty]) => {
                   const prod = products.find(p => p.id === id);
-                  const price = prod?.price || 0;
+                  const price = prod ? getProductPrice(prod) : 0;
                   return (
                     <div key={id} className="flex justify-between items-start text-sm border-b pb-2 last:border-0 last:pb-0 animate-in fade-in slide-in-from-right-2">
                       <div className="flex flex-col pr-4">

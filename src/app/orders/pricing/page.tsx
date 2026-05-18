@@ -8,14 +8,58 @@ import { Input } from "@/components/ui/input";
 import { useState, useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
 import { db } from "@/lib/firebase";
-import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
+import { collection, onSnapshot, query, orderBy, doc, setDoc, getDoc } from "firebase/firestore";
+import { useAuth } from "@/lib/auth";
 
 export default function PricingPage() {
+  const { user } = useAuth();
   const [dbPartners, setDbPartners] = useState<any[]>([]);
   const [selectedPartner, setSelectedPartner] = useState("");
   const [partnerPrices, setPartnerPrices] = useState<Record<string, Record<string, number>>>({});
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  // Firestore에서 저장된 파트너별 커스텀 판매가 정보 실시간 로드
+  useEffect(() => {
+    const q = query(collection(db, "prices"));
+    const unsubscribe = onSnapshot(q, (snapshot: any) => {
+      const priceMap: Record<string, Record<string, number>> = {};
+      snapshot.docs.forEach((doc: any) => {
+        priceMap[doc.id] = doc.data().prices || {};
+      });
+      
+      setPartnerPrices(prev => {
+        const updated = { ...prev };
+        Object.entries(priceMap).forEach(([partnerId, prices]) => {
+          updated[partnerId] = {
+            ...(updated[partnerId] || {}),
+            ...prices
+          };
+        });
+        return updated;
+      });
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleSavePrices = async () => {
+    if (!selectedPartner) return;
+    try {
+      setSaving(true);
+      const partnerPricesDocRef = doc(db, "prices", selectedPartner);
+      await setDoc(partnerPricesDocRef, {
+        prices: currentPrices,
+        updatedAt: new Date().toISOString(),
+        updatedBy: user?.name || user?.email || "system"
+      });
+      alert("판매 가격 설정이 성공적으로 저장되었습니다!");
+    } catch (error) {
+      alert("가격 저장 실패: " + error);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   // Firestore에서 파트너사 목록 로드
   useEffect(() => {
@@ -86,8 +130,20 @@ export default function PricingPage() {
           <h2 className="text-3xl font-bold tracking-tight">MF별 판매가 설정</h2>
           <p className="text-muted-foreground mt-2">각 국가별 마스터 프랜차이즈에 공급하는 판매 가격을 개별적으로 설정합니다.</p>
         </div>
-        <Button className="bg-green-600 hover:bg-green-700">
-          <Save className="mr-2 h-4 w-4" /> 현재 설정 저장
+        <Button 
+          className="bg-green-600 hover:bg-green-700" 
+          onClick={handleSavePrices}
+          disabled={saving || !selectedPartner}
+        >
+          {saving ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" /> 저장 중...
+            </>
+          ) : (
+            <>
+              <Save className="mr-2 h-4 w-4" /> 현재 설정 저장
+            </>
+          )}
         </Button>
       </div>
 

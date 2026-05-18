@@ -11,7 +11,7 @@ import {
 } from "firebase/auth";
 import { doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
 
-export type UserRole = "HQ" | "MF-01" | "MF-02";
+export type UserRole = "HQ" | string;
 
 interface User {
   uid: string;
