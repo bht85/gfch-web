@@ -13,8 +13,10 @@ import {
   getDoc, 
   updateDoc, 
   addDoc, 
-  setDoc 
+  setDoc,
+  where
 } from "firebase/firestore";
+import { DropzoneUploader } from "@/components/ui/dropzone-uploader";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -99,19 +101,36 @@ export default function RoyaltyPage() {
 
   // Real-time subscription to royalties
   useEffect(() => {
-    const q = query(collection(db, "royalties"), orderBy("month", "desc"));
+    if (!user) return;
+
+    let q;
+    if (user.role === "HQ") {
+      q = query(collection(db, "royalties"), orderBy("month", "desc"));
+    } else {
+      q = query(collection(db, "royalties"), where("partnerId", "==", user.role));
+    }
+
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      setRoyalties(snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() })));
+      let royaltiesData = snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }));
+      if (user.role !== "HQ") {
+        royaltiesData.sort((a: any, b: any) => (b.month || "").localeCompare(a.month || ""));
+      }
+      setRoyalties(royaltiesData);
+      setLoading(false);
+    }, (error) => {
+      console.error("Error subscribing to royalties:", error);
       setLoading(false);
     });
     return () => unsubscribe();
-  }, []);
+  }, [user]);
 
   // Fetch partners list
   useEffect(() => {
     const q = query(collection(db, "partners"), orderBy("name", "asc"));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setPartners(snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() })));
+    }, (error) => {
+      console.error("Error fetching partners:", error);
     });
     return () => unsubscribe();
   }, []);
@@ -603,7 +622,7 @@ export default function RoyaltyPage() {
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-black font-mono text-yellow-600">
-                ${renderedLedger.filter(r => r.status === "APPROVED").reduce((sum, r) => sum + (r.royaltyAmount || 0), 0).toLocaleString()}
+                ${renderedLedger.filter(r => r.status === "INVOICED" || r.status === "PAID_SUBMITTED").reduce((sum, r) => sum + (r.royaltyAmount || 0), 0).toLocaleString()}
               </div>
               <p className="text-[10px] text-muted-foreground mt-2">{lang === "KO" ? "본사에서 승인하여 납부 대기 상태인 청구액입니다." : "Invoiced by HQ, waiting for wire transfer."}</p>
             </CardContent>
@@ -617,7 +636,7 @@ export default function RoyaltyPage() {
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-black font-mono text-emerald-600">
-                ${renderedLedger.filter(r => r.status === "PAID").reduce((sum, r) => sum + (r.royaltyAmount || 0), 0).toLocaleString()}
+                ${renderedLedger.filter(r => r.status === "CLEARED" || r.status === "SETTLED").reduce((sum, r) => sum + (r.royaltyAmount || 0), 0).toLocaleString()}
               </div>
               <p className="text-[10px] text-muted-foreground mt-2">{lang === "KO" ? "본사에서 입금 검증을 마친 정산 금액 총합입니다." : "Deposit validated and matched successfully."}</p>
             </CardContent>
@@ -647,7 +666,7 @@ export default function RoyaltyPage() {
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-black font-mono text-yellow-600">
-                ${renderedLedger.filter(r => r.status === "APPROVED").reduce((sum, r) => sum + (r.royaltyAmount || 0), 0).toLocaleString()}
+                ${renderedLedger.filter(r => r.status === "INVOICED" || r.status === "PAID_SUBMITTED").reduce((sum, r) => sum + (r.royaltyAmount || 0), 0).toLocaleString()}
               </div>
               <p className="text-[10px] text-muted-foreground mt-2">{lang === "KO" ? "청구서 발행 완료 후 입금 송금을 기다리는 단계입니다." : "Invoices cleared, awaiting bank transfer receipts."}</p>
             </CardContent>
@@ -661,7 +680,7 @@ export default function RoyaltyPage() {
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-black font-mono text-emerald-600">
-                ${renderedLedger.filter(r => r.status === "PAID").reduce((sum, r) => sum + (r.royaltyAmount || 0), 0).toLocaleString()}
+                ${renderedLedger.filter(r => r.status === "CLEARED" || r.status === "SETTLED").reduce((sum, r) => sum + (r.royaltyAmount || 0), 0).toLocaleString()}
               </div>
               <p className="text-[10px] text-muted-foreground mt-2">{lang === "KO" ? "본사 은행 계좌에 입금 확인되어 마감된 건의 총합입니다." : "Deposits verified and transaction ledger closed."}</p>
             </CardContent>
@@ -1045,14 +1064,12 @@ export default function RoyaltyPage() {
                 />
               </div>
 
-              <div className="grid gap-2">
-                <Label htmlFor="declare-evidence">{lang === "KO" ? "매출 실적 증명 자료" : "Sales Evidence Report"}</Label>
-                <Input 
-                  id="declare-evidence"
-                  type="file"
-                  accept="image/*,application/pdf"
-                  onChange={(e) => setEvidenceFile(e.target.files?.[0] || null)}
-                  required
+              <div className="grid gap-2 mt-4">
+                <Label>{lang === "KO" ? "매출 실적 증명 자료" : "Sales Evidence Report"}</Label>
+                <DropzoneUploader 
+                  onFileSelect={setEvidenceFile} 
+                  selectedFile={evidenceFile}
+                  label={lang === "KO" ? "클릭하거나 파일을 드래그하여 업로드" : "Drag & drop or click to upload"}
                 />
               </div>
 
@@ -1200,23 +1217,17 @@ export default function RoyaltyPage() {
                 </div>
               )}
 
-              <div className="grid gap-2">
-                <Label htmlFor="upload-evidence-file">
+              <div className="grid gap-2 mt-4">
+                <Label>
                   {selectedRoyaltyForUpload?.evidenceUrl 
                     ? (lang === "KO" ? "새로운 파일로 교체" : "Replace with New File")
                     : (lang === "KO" ? "증빙 서류 파일 선택" : "Select Evidence File")
                   }
                 </Label>
-                <Input 
-                  id="upload-evidence-file"
-                  type="file"
-                  accept="image/*,application/pdf"
-                  onChange={(e) => setEvidenceUploadFile(e.target.files?.[0] || null)}
-                  required
+                <DropzoneUploader 
+                  onFileSelect={setEvidenceUploadFile} 
+                  selectedFile={evidenceUploadFile}
                 />
-                <p className="text-[10px] text-muted-foreground">
-                  {lang === "KO" ? "* PDF 문서 또는 이미지 파일(*.jpg, *.png)만 업로드 가능합니다." : "* Accepts PDF documents or image files."}
-                </p>
               </div>
             </div>
             <DialogFooter>
@@ -1335,20 +1346,15 @@ export default function RoyaltyPage() {
                   {lang === "KO" ? "기존 업로드된 송금 이체증이 존재합니다. 새 파일로 갱신하여 덮어씁니다." : "An active bank slip is already uploaded. Choosing a new file will overwrite it."}
                 </div>
               )}
-              <div className="grid gap-2">
-                <Label htmlFor="receipt-upload-file">
+              <div className="grid gap-2 mt-4">
+                <Label>
                   {lang === "KO" ? "송금 증빙 서류 선택" : "Select Wire Receipt File"}
                 </Label>
-                <Input 
-                  id="receipt-upload-file"
-                  type="file"
-                  accept="image/*,application/pdf"
-                  onChange={(e) => setReceiptFile(e.target.files?.[0] || null)}
-                  required
+                <DropzoneUploader 
+                  onFileSelect={setReceiptFile} 
+                  selectedFile={receiptFile}
+                  subLabel={lang === "KO" ? "* 은행 이체 확인 PDF 문서 또는 사진 이미지(*.jpg, *.png)만 업로드 가능합니다." : "* Accepts PDF documents or image files."}
                 />
-                <p className="text-[10px] text-muted-foreground">
-                  {lang === "KO" ? "* 은행 이체 확인 PDF 문서 또는 사진 이미지(*.jpg, *.png)만 업로드 가능합니다." : "* Accepts PDF documents or image files."}
-                </p>
               </div>
             </div>
             <DialogFooter>
@@ -1388,20 +1394,15 @@ export default function RoyaltyPage() {
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
-              <div className="grid gap-2">
-                <Label htmlFor="voucher-upload-file">
+              <div className="grid gap-2 mt-4">
+                <Label>
                   {lang === "KO" ? "본사 수납 증빙/영수증 서류 선택" : "Select HQ Voucher File"}
                 </Label>
-                <Input 
-                  id="voucher-upload-file"
-                  type="file"
-                  accept="image/*,application/pdf"
-                  onChange={(e) => setVoucherFile(e.target.files?.[0] || null)}
-                  required
+                <DropzoneUploader 
+                  onFileSelect={setVoucherFile} 
+                  selectedFile={voucherFile}
+                  subLabel={lang === "KO" ? "* 은행 수납증 PDF 문서 또는 캡쳐 이미지(*.jpg, *.png)만 업로드 가능합니다." : "* Accepts PDF documents or captured image files."}
                 />
-                <p className="text-[10px] text-muted-foreground">
-                  {lang === "KO" ? "* 은행 수납증 PDF 문서 또는 캡쳐 이미지(*.jpg, *.png)만 업로드 가능합니다." : "* Accepts PDF documents or captured image files."}
-                </p>
               </div>
             </div>
             <DialogFooter>

@@ -43,7 +43,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         try {
           // 1. users 컬렉션에서 역할 정보 조회
           const userDocRef = doc(db, "users", firebaseUser.uid);
-          const userDoc = await getDoc(userDocRef);
+          
+          // 💡 3초 타임아웃 적용: Firestore 데이터베이스가 생성되지 않았거나 연결이 지연될 때 무한 로딩 방지
+          const docPromise = getDoc(userDocRef);
+          const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("FIRESTORE_TIMEOUT")), 3000)
+          );
+          
+          const userDoc = await Promise.race([docPromise, timeoutPromise]);
 
           if (userDoc.exists()) {
             setUser(userDoc.data() as User);
@@ -57,7 +64,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 role: "HQ",
                 email: firebaseUser.email
               };
-              await setDoc(userDocRef, hqUser);
+              // 💡 setDoc도 타임아웃 처리 적용
+              const setPromise = setDoc(userDocRef, hqUser);
+              await Promise.race([setPromise, timeoutPromise]);
               setUser(hqUser);
             } else {
               // 권한 없는 유저는 강제 로그아웃
@@ -67,6 +76,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         } catch (error) {
           console.error("Auth initialization error:", error);
+          // 💡 세션에 오류가 있거나 DB 접근 실패 시 로컬 로그아웃 처리하여 무한 로딩 탈출
+          try {
+            await firebaseSignOut(auth);
+          } catch (e) {
+            console.error("Failed to sign out on init error:", e);
+          }
           setUser(null);
         }
       } else {
@@ -92,15 +107,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setLoading(true);
     const cleanedEmail = email.trim().toLowerCase();
     try {
-      // 🔒 1단계: 본사가 사전 승인한 이메일인지 invites 컬렉션 검증
-      const inviteRef = doc(db, "invites", cleanedEmail);
-      const inviteDoc = await getDoc(inviteRef);
+      let role: UserRole = "MF";
+      let partnerCode = "";
+      let inviteRef = null;
 
-      if (!inviteDoc.exists() || inviteDoc.data().status === "USED") {
-        throw new Error("NOT_INVITED");
+      // 💡 예외 처리: hq-admin@gfch.com은 초기 가입 허용 (초대장 검증 패스)
+      if (cleanedEmail === "hq-admin@gfch.com") {
+        role = "HQ";
+      } else {
+        // 🔒 1단계: 본사가 사전 승인한 이메일인지 invites 컬렉션 검증
+        inviteRef = doc(db, "invites", cleanedEmail);
+        const inviteDoc = await getDoc(inviteRef);
+
+        if (!inviteDoc.exists() || inviteDoc.data().status === "USED") {
+          throw new Error("NOT_INVITED");
+        }
+
+        const inviteData = inviteDoc.data();
+        role = inviteData.role as UserRole;
+        partnerCode = inviteData.partnerCode || "";
       }
-
-      const inviteData = inviteDoc.data();
 
       // 🔒 2단계: 실제 Firebase Auth 계정 생성
       const cred = await createUserWithEmailAndPassword(auth, email, password);
@@ -109,26 +135,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const newUser: User = {
         uid: cred.user.uid,
         id: cred.user.uid,
-        name: name || inviteData.name || "MF Partner",
-        role: inviteData.role as UserRole,
-        partnerCode: inviteData.partnerCode || "",
+        name: name || (cleanedEmail === "hq-admin@gfch.com" ? "본사 관리자" : "MF Partner"),
+        role: role,
+        partnerCode: partnerCode,
         email: cleanedEmail
       };
 
       await setDoc(doc(db, "users", cred.user.uid), newUser);
 
-      // 🔒 4단계: 초대장 사용됨으로 변경
-      await updateDoc(inviteRef, {
-        status: "USED",
-        registeredAt: new Date().toISOString(),
-        uid: cred.user.uid
-      });
+      // 🔒 4단계: 초대장 사용됨으로 변경 (hq-admin이 아닌 일반 파트너 가입 시에만)
+      if (inviteRef) {
+        await updateDoc(inviteRef, {
+          status: "USED",
+          registeredAt: new Date().toISOString(),
+          uid: cred.user.uid
+        });
+      }
 
     } catch (error: any) {
       setLoading(false);
       throw error;
-    }
-  };
+      }
+    };
 
   const logout = async () => {
     setLoading(true);

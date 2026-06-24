@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Search, Eye, FileDown, Calendar, FileText, CheckCircle2, Clock, Truck, PackageCheck, Receipt, Download, Upload, Loader2, X } from "lucide-react";
+import { Search, Eye, FileDown, Calendar, FileText, CheckCircle2, Clock, Truck, PackageCheck, Receipt, Download, Upload, Loader2, X, Plus } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import {
   Dialog,
@@ -18,6 +18,7 @@ import { db } from "@/lib/firebase";
 import { collection, onSnapshot, doc, updateDoc, query, where, deleteField, addDoc, orderBy } from "firebase/firestore";
 import { useAuth } from "@/lib/auth";
 import { useTranslation } from "@/lib/i18n";
+import { useDropzone } from "react-dropzone";
 
 // 7단계 워크플로우 정의
 const getWorkflowStages = (t: any) => [
@@ -29,6 +30,117 @@ const getWorkflowStages = (t: any) => [
   { id: "DELIVERED", label: t("delivered"), color: "bg-indigo-100 text-indigo-700 border-indigo-200", icon: CheckCircle2 },
   { id: "COMPLETED", label: t("completed"), color: "bg-green-100 text-green-700 border-green-200", icon: CheckCircle2 },
 ];
+
+const DocumentRow = ({ 
+  label, docKey, docData, uploader, isRequiredNow, lang, selectedOrder,
+  uploadingDoc, handleFileUpload, confirmDelete, setConfirmDelete
+}: any) => {
+  const docUrls = Array.isArray(docData) ? docData : docData ? [docData] : [];
+  const isUploaded = docUrls.length > 0;
+  const isUploading = uploadingDoc === docKey;
+
+  const onDrop = (acceptedFiles: File[]) => {
+    if (acceptedFiles.length > 0) {
+      handleFileUpload(acceptedFiles[0], docKey);
+    }
+  };
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    accept: { 'image/*': [], 'application/pdf': [] },
+    maxSize: 5242880,
+    multiple: false
+  });
+
+  return (
+    <div className={cn("flex flex-col p-4 border rounded-lg bg-card gap-3 transition-colors", isDragActive ? "border-primary bg-primary/5 border-dashed" : "", isRequiredNow ? "border-orange-300 bg-orange-50/30" : "")}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className={cn("w-8 h-8 rounded-full flex items-center justify-center", isUploaded ? "bg-green-100 text-green-600" : "bg-muted text-muted-foreground")}>
+            {isUploaded ? <CheckCircle2 className="w-4 h-4" /> : <FileText className="w-4 h-4" />}
+          </div>
+          <div>
+            <p className="text-sm font-bold flex items-center gap-2">
+              {label} 
+              {isRequiredNow && <Badge variant="destructive" className="text-[9px] px-1 h-4">REQUIRED</Badge>}
+            </p>
+            <p className="text-[10px] text-muted-foreground uppercase">{lang === "KO" ? "담당: " : "By: "}{uploader}</p>
+          </div>
+        </div>
+      </div>
+
+      {uploader === "MF" && !isUploaded && (
+        <div {...getRootProps()} className={cn("mt-2 border-2 border-dashed rounded-lg p-6 flex flex-col items-center justify-center text-center cursor-pointer transition-colors", isDragActive ? "border-primary bg-primary/10" : "border-muted-foreground/20 hover:border-primary/50 hover:bg-muted/50")}>
+          <input {...getInputProps()} />
+          {isUploading ? (
+            <Loader2 className="w-6 h-6 animate-spin text-primary mb-2" />
+          ) : (
+            <Upload className={cn("w-6 h-6 mb-2", isDragActive ? "text-primary" : "text-muted-foreground")} />
+          )}
+          <p className="text-xs font-semibold">{isUploading ? (lang === "KO" ? "업로드 중..." : "Uploading...") : isDragActive ? (lang === "KO" ? "파일을 여기에 놓으세요" : "Drop the file here") : (lang === "KO" ? "클릭하거나 파일을 드래그하여 업로드" : "Drag & drop a file here, or click to select")}</p>
+          <p className="text-[10px] text-muted-foreground mt-1">PDF, JPG, PNG (Max 5MB)</p>
+        </div>
+      )}
+
+      {isUploaded && (
+        <div className="flex flex-wrap gap-2 mt-2 pt-3 border-t border-dashed">
+          {docUrls.map((url: string, idx: number) => {
+            const isConfirming = confirmDelete?.key === docKey && confirmDelete?.idx === idx;
+            return (
+              <div key={idx} className="flex items-center gap-2 bg-muted/30 p-2 rounded-md border w-full justify-between">
+                {!isConfirming ? (
+                  <>
+                    <a href={url} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-xs font-bold text-blue-600 hover:underline">
+                      <FileText className="w-4 h-4" /> {label} #{idx + 1}
+                    </a>
+                    {uploader === "MF" && (
+                      <button type="button" className="h-7 w-7 flex items-center justify-center text-red-400 hover:text-red-600 hover:bg-red-50 rounded" onClick={(e) => { e.stopPropagation(); setConfirmDelete({ key: docKey, idx }); }}>
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  <div className="flex items-center gap-2 animate-in fade-in zoom-in duration-200">
+                    <span className="text-xs font-bold text-red-600 mr-2">{lang === "KO" ? "정말 삭제하시겠습니까?" : "Are you sure to delete?"}</span>
+                    <button className="h-7 px-3 text-xs bg-red-500 text-white rounded hover:bg-red-600 font-bold" onClick={async (e) => {
+                      e.stopPropagation();
+                      try {
+                        const newUrls = docUrls.filter((_: any, i: number) => i !== idx);
+                        await updateDoc(doc(db, "orders", selectedOrder.id), {
+                          [`documents.${docKey}`]: newUrls.length > 0 ? newUrls : deleteField()
+                        });
+                        setConfirmDelete(null);
+                      } catch (err: any) {
+                        alert((lang === "KO" ? "삭제 실패: " : "Delete Failed: ") + err.message);
+                      }
+                    }}>
+                      {lang === "KO" ? "삭제" : "Delete"}
+                    </button>
+                    <button className="h-7 px-3 text-xs bg-slate-200 text-slate-700 rounded font-bold" onClick={(e) => { e.stopPropagation(); setConfirmDelete(null); }}>
+                      {lang === "KO" ? "취소" : "Cancel"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          
+          {uploader === "MF" && (
+            <div {...getRootProps()} className={cn("mt-2 border-2 border-dashed rounded-lg p-3 flex flex-col items-center justify-center text-center cursor-pointer transition-colors w-full", isDragActive ? "border-primary bg-primary/10" : "border-muted-foreground/20 hover:border-primary/50 hover:bg-muted/50")}>
+              <input {...getInputProps()} />
+              {isUploading ? (
+                <div className="flex items-center gap-2 text-xs font-bold text-primary"><Loader2 className="w-4 h-4 animate-spin" /> 업로드 중...</div>
+              ) : (
+                <div className="flex items-center gap-2 text-xs font-bold text-muted-foreground"><Plus className="w-4 h-4" /> {lang === "KO" ? "파일 추가 업로드" : "Upload Additional File"}</div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 
 export default function OrderHistoryPage() {
   const { user } = useAuth();
@@ -87,15 +199,13 @@ export default function OrderHistoryPage() {
     return () => unsubscribe();
   }, [selectedPartner, selectedOrder?.id]);
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, docKey: string) => {
-    const file = e.target.files?.[0];
+  const handleFileUpload = async (file: File | undefined, docKey: string) => {
     if (!file || !selectedOrder) return;
 
     // 파일 크기 검증 (최대 5MB)
     const maxSize = Number(process.env.NEXT_PUBLIC_MAX_FILE_SIZE_BYTES) || 5242880;
     if (file.size > maxSize) {
       alert(lang === "KO" ? "파일 크기가 5MB를 초과합니다." : "File size exceeds 5MB limit.");
-      e.target.value = "";
       return;
     }
 
@@ -103,7 +213,6 @@ export default function OrderHistoryPage() {
     const allowedTypes = ["application/pdf", "image/jpeg", "image/png", "image/jpg"];
     if (!allowedTypes.includes(file.type)) {
       alert(lang === "KO" ? "PDF, JPG, PNG 파일만 업로드할 수 있습니다." : "Only PDF, JPG, PNG files are allowed.");
-      e.target.value = "";
       return;
     }
 
@@ -187,131 +296,13 @@ export default function OrderHistoryPage() {
           const isCurrent = index === currentIndex;
           return (
             <div key={stage.id} className="relative z-10 flex flex-col items-center gap-2 min-w-[80px]">
-              <div className={cn(
-                "w-8 h-8 rounded-full flex items-center justify-center border-2 transition-colors",
-                isPast ? "bg-primary border-primary text-primary-foreground" : 
-                isCurrent ? "bg-background border-primary text-primary ring-4 ring-primary/20" : 
-                "bg-background border-muted text-muted-foreground"
-              )}>
+              <div className={cn("w-8 h-8 rounded-full flex items-center justify-center border-2 transition-colors", isPast ? "bg-primary border-primary text-primary-foreground" : isCurrent ? "bg-background border-primary text-primary ring-4 ring-primary/20" : "bg-background border-muted text-muted-foreground")}>
                 <StageIcon className="w-4 h-4" />
               </div>
               <span className={cn("text-[10px] font-bold text-center", isCurrent ? "text-primary" : "text-muted-foreground")}>{stage.label}</span>
             </div>
           );
         })}
-      </div>
-    );
-  };
-
-  const renderDocumentRow = (label: string, docKey: string, docData: any, uploader: string, isRequiredNow: boolean = false) => {
-    const docUrls = Array.isArray(docData) ? docData : docData ? [docData] : [];
-    const isUploaded = docUrls.length > 0;
-    const isUploading = uploadingDoc === docKey;
-    
-    return (
-      <div className="flex flex-col p-3 border rounded-lg bg-card gap-2">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className={cn("w-8 h-8 rounded-full flex items-center justify-center", isUploaded ? "bg-green-100 text-green-600" : "bg-muted text-muted-foreground")}>
-              {isUploaded ? <CheckCircle2 className="w-4 h-4" /> : <FileText className="w-4 h-4" />}
-            </div>
-            <div>
-              <p className="text-xs font-bold">{label}</p>
-              <p className="text-[9px] text-muted-foreground uppercase">{lang === "KO" ? "담당: " : "By: "}{uploader}</p>
-            </div>
-          </div>
-          
-          <div className="flex items-center gap-2">
-            {uploader === "MF" ? (
-              <>
-                <input 
-                  id={`file-${docKey}`}
-                  type="file" 
-                  className="hidden" 
-                  onChange={(e) => handleFileUpload(e, docKey)}
-                />
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  className="h-7 text-[10px]"
-                  onClick={() => document.getElementById(`file-${docKey}`)?.click()}
-                  disabled={isUploading}
-                >
-                  {isUploading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3 mr-1" />}
-                  {isUploaded ? (lang === "KO" ? "추가" : "Add") : (lang === "KO" ? "업로드" : "Upload")}
-                </Button>
-              </>
-            ) : !isUploaded && (
-              <span className="text-[10px] text-muted-foreground italic">{lang === "KO" ? "본사 확인 중" : "Checking..."}</span>
-            )}
-          </div>
-        </div>
-
-        {isUploaded && (
-          <div className="flex flex-wrap gap-1 mt-1 pt-2 border-t border-dashed">
-            {docUrls.map((url, idx) => {
-              const isConfirming = confirmDelete?.key === docKey && confirmDelete?.idx === idx;
-              
-              return (
-                <div key={idx} className="flex items-center gap-1 bg-muted/50 p-1 rounded border">
-                  {!isConfirming ? (
-                    <>
-                      <a 
-                        href={url} 
-                        target="_blank" 
-                        rel="noreferrer"
-                        className="inline-flex items-center h-6 text-[10px] px-2 py-0 bg-white border rounded hover:bg-slate-50 transition-colors"
-                      >
-                        <Eye className="w-3 h-3 mr-1" /> #{idx + 1}
-                      </a>
-                      {uploader === "MF" && (
-                        <button 
-                          type="button"
-                          className="h-6 w-6 flex items-center justify-center text-red-400 hover:text-red-600 hover:bg-red-50 rounded"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setConfirmDelete({ key: docKey, idx });
-                          }}
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </>
-                  ) : (
-                    <div className="flex items-center gap-1 animate-in fade-in zoom-in duration-200">
-                      <button 
-                        className="h-6 px-2 text-[9px] bg-red-500 text-white rounded hover:bg-red-600"
-                        onClick={async (e) => {
-                          e.stopPropagation();
-                          try {
-                            const newUrls = docUrls.filter((_, i) => i !== idx);
-                            await updateDoc(doc(db, "orders", selectedOrder.id), {
-                              [`documents.${docKey}`]: newUrls.length > 0 ? newUrls : deleteField()
-                            });
-                            setConfirmDelete(null);
-                          } catch (err: any) {
-                            alert((lang === "KO" ? "삭제 실패: " : "Delete Failed: ") + err.message);
-                          }
-                        }}
-                      >
-                        {lang === "KO" ? "삭제" : "Delete"}
-                      </button>
-                      <button 
-                        className="h-6 px-2 text-[9px] bg-slate-200 text-slate-600 rounded"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setConfirmDelete(null);
-                        }}
-                      >
-                        {lang === "KO" ? "취소" : "Cancel"}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
       </div>
     );
   };
@@ -444,12 +435,12 @@ export default function OrderHistoryPage() {
                 </div>
                 <div className="space-y-4">
                   <h3 className="font-bold border-b pb-2">{t("docSubmission")}</h3>
-                  <div className="space-y-2">
-                    {renderDocumentRow("Proforma Invoice (PI)", "pi", selectedOrder.documents?.pi, "HQ")}
-                    {renderDocumentRow(lang === "KO" ? "T/T Copy (해외 송금증)" : "T/T Copy (Wire Transfer)", "ttCopy", selectedOrder.documents?.ttCopy, "MF", selectedOrder.status === "PAYMENT_PENDING")}
-                    {renderDocumentRow(lang === "KO" ? "은행 입금 확인증" : "Bank Receipt", "bankReceipt", selectedOrder.documents?.bankReceipt, "HQ")}
-                    <div className="border-t border-dashed my-2"></div>
-                    {renderDocumentRow(lang === "KO" ? "B/L 또는 AWB" : "B/L or AWB (Shipping Doc)", "bl", selectedOrder.documents?.bl, "HQ")}
+                  <div className="space-y-4">
+                    <DocumentRow label="Proforma Invoice (PI)" docKey="pi" docData={selectedOrder.documents?.pi} uploader="HQ" lang={lang} selectedOrder={selectedOrder} uploadingDoc={uploadingDoc} handleFileUpload={handleFileUpload} confirmDelete={confirmDelete} setConfirmDelete={setConfirmDelete} />
+                    <DocumentRow label={lang === "KO" ? "T/T Copy (해외 송금증)" : "T/T Copy (Wire Transfer)"} docKey="ttCopy" docData={selectedOrder.documents?.ttCopy} uploader="MF" isRequiredNow={selectedOrder.status === "PAYMENT_PENDING"} lang={lang} selectedOrder={selectedOrder} uploadingDoc={uploadingDoc} handleFileUpload={handleFileUpload} confirmDelete={confirmDelete} setConfirmDelete={setConfirmDelete} />
+                    <DocumentRow label={lang === "KO" ? "은행 입금 확인증" : "Bank Receipt"} docKey="bankReceipt" docData={selectedOrder.documents?.bankReceipt} uploader="HQ" lang={lang} selectedOrder={selectedOrder} uploadingDoc={uploadingDoc} handleFileUpload={handleFileUpload} confirmDelete={confirmDelete} setConfirmDelete={setConfirmDelete} />
+                    <div className="border-t border-dashed my-4"></div>
+                    <DocumentRow label={lang === "KO" ? "B/L 또는 AWB" : "B/L or AWB (Shipping Doc)"} docKey="bl" docData={selectedOrder.documents?.bl} uploader="HQ" lang={lang} selectedOrder={selectedOrder} uploadingDoc={uploadingDoc} handleFileUpload={handleFileUpload} confirmDelete={confirmDelete} setConfirmDelete={setConfirmDelete} />
                   </div>
                 </div>
               </div>

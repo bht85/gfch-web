@@ -12,6 +12,18 @@ import { useAuth } from "@/lib/auth";
 import { useTranslation } from "@/lib/i18n";
 import { db } from "@/lib/firebase";
 import { collection, getDocs, query, orderBy, setDoc, doc, onSnapshot } from "firebase/firestore";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import * as z from "zod";
+import { motion, AnimatePresence } from "framer-motion";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+
+const formSchema = z.object({
+  shippingMethod: z.string().min(1, "배송 방법을 선택해주세요"),
+  notes: z.string().optional()
+});
 
 interface Product {
   id: string;
@@ -34,6 +46,14 @@ export default function PlaceOrderPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [cart, setCart] = useState<Record<string, number>>({});
   const [isOrdered, setIsOrdered] = useState(false);
+
+  const form = useForm<z.infer<typeof formSchema>>({
+    resolver: zodResolver(formSchema),
+    defaultValues: {
+      shippingMethod: "SEA",
+      notes: ""
+    }
+  });
   
   // Firestore에서 로드된 실시간 파트너 목록
   const [dbPartners, setDbPartners] = useState<any[]>([]);
@@ -149,8 +169,11 @@ export default function PlaceOrderPage() {
   }, 0);
 
   // 2. 발주서 전송 (Firestore 실제 추가)
-  const handleOrderSubmit = async () => {
-    if (cartItems.length === 0 || isOrdered) return;
+  const onSubmit = async (values: z.infer<typeof formSchema>) => {
+    if (cartItems.length === 0 || isOrdered) {
+      if (cartItems.length === 0) alert(lang === "KO" ? "장바구니가 비어 있습니다." : "Cart is empty.");
+      return;
+    }
     setIsOrdered(true);
 
     try {
@@ -186,6 +209,8 @@ export default function PlaceOrderPage() {
         totalAmount: totalAmount, // 숫자형 원본 금액
         status: "PENDING", // 승인 대기
         paymentStatus: "UNPAID",
+        shippingMethod: values.shippingMethod,
+        notes: values.notes || "",
         receiptUrl: "",
         documents: {}, // 객체 형태로 호환성 높임
         items: orderItems,
@@ -366,81 +391,134 @@ export default function PlaceOrderPage() {
 
         {/* 오른쪽: 실시간 발주 요약 */}
         <div className="space-y-4">
-          <div className="bg-card p-6 rounded-lg border shadow-sm sticky top-6 space-y-6">
-            <h3 className="font-bold text-lg flex items-center gap-2 text-foreground">
-              <Package className="h-5 w-5 text-primary" />
-              {lang === "KO" ? "실시간 발주서 요약" : "Order Summary"}
-            </h3>
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(onSubmit)} className="bg-card p-6 rounded-lg border shadow-sm sticky top-6 space-y-6">
+              <h3 className="font-bold text-lg flex items-center gap-2 text-foreground">
+                <Package className="h-5 w-5 text-primary" />
+                {lang === "KO" ? "실시간 발주서 요약" : "Order Summary"}
+              </h3>
 
-            {/* 담긴 물품 내역 */}
-            <div className="space-y-4 max-h-[300px] overflow-y-auto pr-1">
-              {cartItems.length === 0 ? (
-                <div className="text-sm text-muted-foreground py-12 text-center border-2 border-dashed rounded-md flex flex-col items-center justify-center gap-2">
-                  <ShoppingCart className="h-6 w-6 text-muted-foreground/50" />
-                  <p>{lang === "KO" ? "장바구니가 비어 있습니다." : "No items selected."}</p>
-                </div>
-              ) : (
-                cartItems.map(([id, qty]) => {
-                  const prod = products.find(p => p.id === id);
-                  const price = prod ? getProductPrice(prod) : 0;
-                  return (
-                    <div key={id} className="flex justify-between items-start text-sm border-b pb-2 last:border-0 last:pb-0 animate-in fade-in slide-in-from-right-2">
-                      <div className="flex flex-col pr-4">
-                        <span className="font-medium text-foreground text-xs leading-tight">{prod?.name}</span>
-                        <span className="text-[10px] text-muted-foreground mt-1">
-                          ${price.toFixed(2)} x {qty}
-                        </span>
-                      </div>
-                      <span className="font-mono font-bold text-foreground text-sm shrink-0">
-                        ${(price * qty).toFixed(2)}
-                      </span>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-
-            {/* 합계금액 및 발주 버튼 */}
-            <div className="border-t pt-4 space-y-4">
-              <div className="flex justify-between items-end">
-                <span className="text-muted-foreground text-xs font-semibold">
-                  {lang === "KO" ? "총 합계 금액" : "Total Amount"}
-                </span>
-                <div className="text-right">
-                  <span className="text-2xl font-black text-primary font-mono">${totalAmount.toLocaleString()}</span>
-                  <p className="text-[10px] text-muted-foreground mt-1">현재 적용 고정환율 기준</p>
-                </div>
-              </div>
-              
-              <div className="bg-orange-50 border border-orange-100 p-3 rounded-md flex gap-2 text-orange-800 text-[11px] leading-relaxed">
-                <Info className="h-4 w-4 shrink-0 text-orange-600 mt-0.5" />
-                <p>
-                  {lang === "KO"
-                    ? "본사 관리자의 전산 확인 및 승인 절차를 거쳐 선적 및 배송 단계로 진입합니다."
-                    : "The shipment and logistics stage begins once the HQ administrator reviews and approves this order request."}
-                </p>
-              </div>
-
-              <Button 
-                className="w-full h-12 text-base font-bold shadow-lg shadow-primary/10 transition-all hover:scale-[1.01]" 
-                disabled={cartItems.length === 0 || isOrdered}
-                onClick={handleOrderSubmit}
-              >
-                {isOrdered ? (
-                  <div className="flex items-center gap-2 justify-center">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    <span>{lang === "KO" ? "발주서 전송 중..." : "Sending..."}</span>
+              {/* 담긴 물품 내역 */}
+              <div className="space-y-4 max-h-[250px] overflow-y-auto pr-1">
+                {cartItems.length === 0 ? (
+                  <div className="text-sm text-muted-foreground py-12 text-center border-2 border-dashed rounded-md flex flex-col items-center justify-center gap-2">
+                    <ShoppingCart className="h-6 w-6 text-muted-foreground/50" />
+                    <p>{lang === "KO" ? "장바구니가 비어 있습니다." : "No items selected."}</p>
                   </div>
                 ) : (
-                  <div className="flex items-center gap-2 justify-center">
-                    <Send className="h-4 w-4" /> 
-                    <span>{lang === "KO" ? "발주서 제출하기" : "Submit Purchase Order"}</span>
-                  </div>
+                  <AnimatePresence>
+                    {cartItems.map(([id, qty]) => {
+                      const prod = products.find(p => p.id === id);
+                      const price = prod ? getProductPrice(prod) : 0;
+                      return (
+                        <motion.div 
+                          key={id} 
+                          initial={{ opacity: 0, x: 20 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          exit={{ opacity: 0, x: -20 }}
+                          className="flex justify-between items-start text-sm border-b pb-2 last:border-0 last:pb-0"
+                        >
+                          <div className="flex flex-col pr-4">
+                            <span className="font-medium text-foreground text-xs leading-tight">{prod?.name}</span>
+                            <span className="text-[10px] text-muted-foreground mt-1">
+                              ${price.toFixed(2)} x {qty}
+                            </span>
+                          </div>
+                          <span className="font-mono font-bold text-foreground text-sm shrink-0">
+                            ${(price * qty).toFixed(2)}
+                          </span>
+                        </motion.div>
+                      );
+                    })}
+                  </AnimatePresence>
                 )}
-              </Button>
-            </div>
+              </div>
 
-          </div>
+              {/* 추가 입력 폼 */}
+              <div className="space-y-4 pt-4 border-t border-dashed">
+                <FormField
+                  control={form.control}
+                  name="shippingMethod"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs font-bold">{lang === "KO" ? "배송 방법 (Shipping)" : "Shipping Method"}</FormLabel>
+                      <Select onValueChange={field.onChange} defaultValue={field.value}>
+                        <FormControl>
+                          <SelectTrigger className="text-xs h-9">
+                            <SelectValue placeholder="Select shipping method" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="SEA">해운 (Ocean Freight) - 기본</SelectItem>
+                          <SelectItem value="AIR">항공 (Air Freight) - 추가 비용</SelectItem>
+                          <SelectItem value="DHL">국제특송 (DHL/FedEx)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="notes"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs font-bold">{lang === "KO" ? "요청 사항 (Notes)" : "Notes"}</FormLabel>
+                      <FormControl>
+                        <Textarea 
+                          placeholder={lang === "KO" ? "본사 물류팀에 전달할 특별 요청사항을 적어주세요." : "Special requests for the HQ logistics team."}
+                          className="resize-none text-xs h-16"
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              {/* 합계금액 및 발주 버튼 */}
+              <div className="border-t pt-4 space-y-4">
+                <div className="flex justify-between items-end">
+                  <span className="text-muted-foreground text-xs font-semibold">
+                    {lang === "KO" ? "총 합계 금액" : "Total Amount"}
+                  </span>
+                  <div className="text-right">
+                    <span className="text-2xl font-black text-primary font-mono">${totalAmount.toLocaleString()}</span>
+                    <p className="text-[10px] text-muted-foreground mt-1">현재 적용 고정환율 기준</p>
+                  </div>
+                </div>
+                
+                <div className="bg-orange-50 border border-orange-100 p-3 rounded-md flex gap-2 text-orange-800 text-[11px] leading-relaxed">
+                  <Info className="h-4 w-4 shrink-0 text-orange-600 mt-0.5" />
+                  <p>
+                    {lang === "KO"
+                      ? "본사 관리자의 전산 확인 및 승인 절차를 거쳐 선적 및 배송 단계로 진입합니다."
+                      : "The shipment and logistics stage begins once the HQ administrator reviews and approves this order request."}
+                  </p>
+                </div>
+
+                <Button 
+                  type="submit"
+                  className="w-full h-12 text-base font-bold shadow-lg shadow-primary/10 transition-all hover:scale-[1.01]" 
+                  disabled={cartItems.length === 0 || isOrdered}
+                >
+                  {isOrdered ? (
+                    <div className="flex items-center gap-2 justify-center">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>{lang === "KO" ? "발주서 전송 중..." : "Sending..."}</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 justify-center">
+                      <Send className="h-4 w-4" /> 
+                      <span>{lang === "KO" ? "발주서 제출하기" : "Submit Purchase Order"}</span>
+                    </div>
+                  )}
+                </Button>
+              </div>
+            </form>
+          </Form>
         </div>
       </div>
     </div>
