@@ -186,6 +186,9 @@ export default function Dashboard() {
         if (o.documents.bl && o.documents.bl.length > 0) {
           docList.push({ name: `B/L Shipping Document (${o.id})`, date: o.date || "Today", type: "BL", url: o.documents.bl[0] });
         }
+        if (o.documents.exportDeclaration && o.documents.exportDeclaration.length > 0) {
+          docList.push({ name: `Export Dec (${o.id})`, date: o.date || "Today", type: "ED", url: o.documents.exportDeclaration[0] });
+        }
       }
     });
     return docList.slice(0, 3); // 상위 3개만 표출

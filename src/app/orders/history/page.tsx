@@ -441,6 +441,7 @@ export default function OrderHistoryPage() {
                     <DocumentRow label={lang === "KO" ? "은행 입금 확인증" : "Bank Receipt"} docKey="bankReceipt" docData={selectedOrder.documents?.bankReceipt} uploader="HQ" lang={lang} selectedOrder={selectedOrder} uploadingDoc={uploadingDoc} handleFileUpload={handleFileUpload} confirmDelete={confirmDelete} setConfirmDelete={setConfirmDelete} />
                     <div className="border-t border-dashed my-4"></div>
                     <DocumentRow label={lang === "KO" ? "B/L 또는 AWB" : "B/L or AWB (Shipping Doc)"} docKey="bl" docData={selectedOrder.documents?.bl} uploader="HQ" lang={lang} selectedOrder={selectedOrder} uploadingDoc={uploadingDoc} handleFileUpload={handleFileUpload} confirmDelete={confirmDelete} setConfirmDelete={setConfirmDelete} />
+                    <DocumentRow label={lang === "KO" ? "수출신고필증" : "Export Declaration"} docKey="exportDeclaration" docData={selectedOrder.documents?.exportDeclaration} uploader="HQ" isRequiredNow={selectedOrder.status === "SHIPPING"} lang={lang} selectedOrder={selectedOrder} uploadingDoc={uploadingDoc} handleFileUpload={handleFileUpload} confirmDelete={confirmDelete} setConfirmDelete={setConfirmDelete} />
                   </div>
                 </div>
               </div>
