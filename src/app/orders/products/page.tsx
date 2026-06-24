@@ -22,17 +22,20 @@ import { Label } from "@/components/ui/label";
 import { Loader2, Plus, Edit2, Trash2, Search, Truck } from "lucide-react";
 
 // 카테고리 정의
-const getCategories = (t: any) => [
-  { id: "RAW", label: t("rawMaterial") || "Raw Material" },
-  { id: "CONSUMABLE", label: t("consumable") || "Consumable" },
-  { id: "MD", label: t("mdProduct") || "MD Product" },
+const getCategories = (lang: string) => [
+  { id: "RAW", label: lang === "KO" ? "식자재" : "Food Ingredient" },
+  { id: "PACKAGING", label: lang === "KO" ? "포장재" : "Packaging" },
+  { id: "UNIFORM", label: lang === "KO" ? "유니폼" : "Uniform" },
+  { id: "CONSUMABLE", label: lang === "KO" ? "소모품" : "Consumable" },
+  { id: "EQUIPMENT", label: lang === "KO" ? "장비" : "Equipment" },
+  { id: "EQUIPMENT_PARTS", label: lang === "KO" ? "장비부품" : "Equipment Parts" },
 ];
 
 export default function ProductsPage() {
   const { user, loading: authLoading } = useAuth();
   const { t, lang } = useTranslation();
   const router = useRouter();
-  const CATEGORIES = getCategories(t);
+  const CATEGORIES = getCategories(lang);
 
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -50,7 +53,21 @@ export default function ProductsPage() {
     cost: "",
     costKrw: "",
     exchangeRate: "1340",
-    vendor: "Seoul Logistics"
+    vendor: "Seoul Logistics",
+    productCode: "",
+    nameKo: "",
+    nameEn: "",
+    maker: "",
+    country: "",
+    expiration: "",
+    spec: "",
+    netVolume: "",
+    width: "",
+    length: "",
+    height: "",
+    cbm: "",
+    netWeight: "",
+    grossWeight: "",
   });
 
   // 보안 체크
@@ -89,7 +106,7 @@ export default function ProductsPage() {
     return () => unsubscribe();
   }, []);
 
-  // 새 제품 등록용 원화/환율 실시간 달러 환산 핸들러
+  // 새 제품 등록용 원화/환율 실시간 달러 환산 및 CBM 계산 핸들러
   const handleFormDataChange = (field: string, value: any) => {
     setFormData(prev => {
       const next = { ...prev, [field]: value };
@@ -104,11 +121,21 @@ export default function ProductsPage() {
           next.cost = "";
         }
       }
+
+      // 가로, 세로, 높이가 입력되면 CBM 계산
+      if (field === "width" || field === "length" || field === "height") {
+        const w = parseFloat(next.width);
+        const l = parseFloat(next.length);
+        const h = parseFloat(next.height);
+        if (!isNaN(w) && !isNaN(l) && !isNaN(h)) {
+          next.cbm = ((w * l * h) / 1000000).toFixed(4);
+        }
+      }
       return next;
     });
   };
 
-  // 제품 수정용 원화/환율 실시간 달러 환산 핸들러
+  // 제품 수정용 원화/환율 실시간 달러 환산 및 CBM 계산 핸들러
   const handleEditingProductChange = (field: string, value: any) => {
     setEditingProduct((prev: any) => {
       if (!prev) return prev;
@@ -124,17 +151,50 @@ export default function ProductsPage() {
           next.cost = "";
         }
       }
+
+      // 가로, 세로, 높이가 입력되면 CBM 계산
+      if (field === "width" || field === "length" || field === "height") {
+        const w = parseFloat(next.width);
+        const l = parseFloat(next.length);
+        const h = parseFloat(next.height);
+        if (!isNaN(w) && !isNaN(l) && !isNaN(h)) {
+          next.cbm = ((w * l * h) / 1000000).toFixed(4);
+        }
+      }
       return next;
     });
   };
 
   const handleAddProduct = async () => {
-    if (!formData.name) return;
+    const nameKo = formData.nameKo.trim();
+    const nameEn = formData.nameEn.trim();
+    if (!nameKo && !nameEn) {
+      alert(lang === "KO" ? "품목명(국문 또는 영문)을 입력해주세요." : "Please enter product name (Korean or English).");
+      return;
+    }
+    
+    // 호환성을 위해 name 필드 합성
+    const combinedName = nameKo && nameEn ? `${nameKo} (${nameEn})` : (nameKo || nameEn);
+
     try {
       const dataToSave = {
-        name: formData.name,
+        name: combinedName,
+        nameKo,
+        nameEn,
+        productCode: formData.productCode.trim(),
         category: formData.category,
-        vendor: formData.vendor,
+        vendor: formData.vendor.trim(),
+        maker: formData.maker.trim(),
+        country: formData.country.trim(),
+        expiration: formData.expiration.trim(),
+        spec: formData.spec.trim(),
+        netVolume: formData.netVolume.trim(),
+        width: parseFloat(formData.width) || 0,
+        length: parseFloat(formData.length) || 0,
+        height: parseFloat(formData.height) || 0,
+        cbm: parseFloat(formData.cbm) || 0,
+        netWeight: parseFloat(formData.netWeight) || 0,
+        grossWeight: parseFloat(formData.grossWeight) || 0,
         cost: parseFloat(formData.cost) || 0,
         costKrw: parseFloat(formData.costKrw) || 0,
         exchangeRate: parseFloat(formData.exchangeRate) || systemExchangeRate || 1340,
@@ -146,7 +206,21 @@ export default function ProductsPage() {
         cost: "",
         costKrw: "",
         exchangeRate: systemExchangeRate.toString(),
-        vendor: "Seoul Logistics"
+        vendor: "Seoul Logistics",
+        productCode: "",
+        nameKo: "",
+        nameEn: "",
+        maker: "",
+        country: "",
+        expiration: "",
+        spec: "",
+        netVolume: "",
+        width: "",
+        length: "",
+        height: "",
+        cbm: "",
+        netWeight: "",
+        grossWeight: "",
       });
       setIsAddModalOpen(false);
     } catch (error) {
@@ -156,12 +230,34 @@ export default function ProductsPage() {
 
   const handleUpdateProduct = async () => {
     if (!editingProduct) return;
+    const nameKo = editingProduct.nameKo?.trim() || "";
+    const nameEn = editingProduct.nameEn?.trim() || "";
+    if (!nameKo && !nameEn) {
+      alert(lang === "KO" ? "품목명(국문 또는 영문)을 입력해주세요." : "Please enter product name (Korean or English).");
+      return;
+    }
+    const combinedName = nameKo && nameEn ? `${nameKo} (${nameEn})` : (nameKo || nameEn);
+
     try {
       const { id, ...rawContent } = editingProduct;
       const dataToSave = {
-        name: rawContent.name,
+        name: combinedName,
+        nameKo,
+        nameEn,
+        productCode: (rawContent.productCode || "").trim(),
         category: rawContent.category,
-        vendor: rawContent.vendor,
+        vendor: (rawContent.vendor || "").trim(),
+        maker: (rawContent.maker || "").trim(),
+        country: (rawContent.country || "").trim(),
+        expiration: (rawContent.expiration || "").trim(),
+        spec: (rawContent.spec || "").trim(),
+        netVolume: (rawContent.netVolume || "").trim(),
+        width: parseFloat(rawContent.width) || 0,
+        length: parseFloat(rawContent.length) || 0,
+        height: parseFloat(rawContent.height) || 0,
+        cbm: parseFloat(rawContent.cbm) || 0,
+        netWeight: parseFloat(rawContent.netWeight) || 0,
+        grossWeight: parseFloat(rawContent.grossWeight) || 0,
         cost: parseFloat(rawContent.cost) || 0,
         costKrw: parseFloat(rawContent.costKrw) || 0,
         exchangeRate: parseFloat(rawContent.exchangeRate) || systemExchangeRate || 1340,
@@ -201,40 +297,106 @@ export default function ProductsPage() {
           <Plus className="mr-2 h-4 w-4" /> {lang === "KO" ? "새 제품 등록" : "Add New Product"}
         </Button>
         <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
-          <DialogContent className="sm:max-w-[450px]">
+          <DialogContent className="sm:max-w-[700px] max-h-[85vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>{lang === "KO" ? "새 제품 등록" : "Register New Product"}</DialogTitle>
               <DialogDescription>{lang === "KO" ? "제품 정보와 공급처를 입력하세요." : "Enter product details and vendor info."}</DialogDescription>
             </DialogHeader>
             
-            <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-2 gap-4 py-4">
               <div className="grid gap-2">
-                <Label htmlFor="name">{lang === "KO" ? "제품명" : "Product Name"}</Label>
-                <Input id="name" value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} placeholder={lang === "KO" ? "제품명을 입력하세요" : "Enter product name"} />
+                <Label htmlFor="productCode">{lang === "KO" ? "품목코드" : "Item Code"}</Label>
+                <Input id="productCode" value={formData.productCode} onChange={(e) => handleFormDataChange("productCode", e.target.value)} placeholder="예: PA-01" />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="vendor">{lang === "KO" ? "공급사 (Vendor)" : "Vendor"}</Label>
-                <Input id="vendor" value={formData.vendor} onChange={(e) => setFormData({...formData, vendor: e.target.value})} />
+                <Label htmlFor="category">{lang === "KO" ? "품목" : "Category"}</Label>
+                <select 
+                  id="category"
+                  className="flex h-10 w-full rounded-lg border border-input bg-transparent px-3 py-1 text-sm outline-none focus-visible:border-ring focus-visible:ring-3"
+                  value={formData.category}
+                  onChange={(e) => handleFormDataChange("category", e.target.value)}
+                >
+                  {CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                </select>
               </div>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2 col-span-2">
-                  <Label htmlFor="category">{lang === "KO" ? "카테고리" : "Category"}</Label>
-                  <select 
-                    id="category"
-                    className="flex h-10 w-full rounded-lg border border-input bg-transparent px-3 py-1 text-sm outline-none focus-visible:border-ring focus-visible:ring-3"
-                    value={formData.category}
-                    onChange={(e) => setFormData({...formData, category: e.target.value})}
-                  >
-                    {CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
-                  </select>
+
+              <div className="grid gap-2">
+                <Label htmlFor="nameKo">{lang === "KO" ? "품목명 (국문)" : "Product Name (Ko)"}</Label>
+                <Input id="nameKo" value={formData.nameKo} onChange={(e) => handleFormDataChange("nameKo", e.target.value)} placeholder="국문 품목명" />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="nameEn">{lang === "KO" ? "품목명 (영문)" : "Product Name (En)"}</Label>
+                <Input id="nameEn" value={formData.nameEn} onChange={(e) => handleFormDataChange("nameEn", e.target.value)} placeholder="영문 품목명" />
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="vendor">{lang === "KO" ? "공급사" : "Vendor"}</Label>
+                <Input id="vendor" value={formData.vendor} onChange={(e) => handleFormDataChange("vendor", e.target.value)} />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="maker">{lang === "KO" ? "제조사명" : "Manufacturer"}</Label>
+                <Input id="maker" value={formData.maker} onChange={(e) => handleFormDataChange("maker", e.target.value)} placeholder="제조사명" />
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="country">{lang === "KO" ? "제조국가" : "Country of Origin"}</Label>
+                <Input id="country" value={formData.country} onChange={(e) => handleFormDataChange("country", e.target.value)} placeholder="예: 대한민국" />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="expiration">{lang === "KO" ? "소비기한" : "Shelf Life"}</Label>
+                <Input id="expiration" value={formData.expiration} onChange={(e) => handleFormDataChange("expiration", e.target.value)} placeholder="예: 제조일로부터 12개월" />
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="spec">{lang === "KO" ? "규격" : "Specification"}</Label>
+                <Input id="spec" value={formData.spec} onChange={(e) => handleFormDataChange("spec", e.target.value)} placeholder="예: 500g, Box" />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="netVolume">{lang === "KO" ? "제품 순증량" : "Net Content"}</Label>
+                <Input id="netVolume" value={formData.netVolume} onChange={(e) => handleFormDataChange("netVolume", e.target.value)} placeholder="예: 450g" />
+              </div>
+
+              {/* 포장 박스 규격 정보 */}
+              <div className="col-span-2 border-t pt-4 mt-2">
+                <h4 className="text-xs font-bold text-slate-700 mb-3">
+                  📦 {lang === "KO" ? "포장 박스 크기 및 CBM" : "Box Dimensions & CBM"}
+                </h4>
+                <div className="grid grid-cols-4 gap-3">
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="width" className="text-[11px] text-muted-foreground">{lang === "KO" ? "가로 (cm)" : "Width (cm)"}</Label>
+                    <Input id="width" type="number" placeholder="0" value={formData.width} onChange={(e) => handleFormDataChange("width", e.target.value)} />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="length" className="text-[11px] text-muted-foreground">{lang === "KO" ? "세로 (cm)" : "Length (cm)"}</Label>
+                    <Input id="length" type="number" placeholder="0" value={formData.length} onChange={(e) => handleFormDataChange("length", e.target.value)} />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="height" className="text-[11px] text-muted-foreground">{lang === "KO" ? "높이 (cm)" : "Height (cm)"}</Label>
+                    <Input id="height" type="number" placeholder="0" value={formData.height} onChange={(e) => handleFormDataChange("height", e.target.value)} />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="cbm" className="text-[11px] text-primary font-bold">{lang === "KO" ? "CBM (자동)" : "CBM (Auto)"}</Label>
+                    <Input id="cbm" type="number" placeholder="0.0000" className="border-primary/50 bg-primary/5 font-mono" value={formData.cbm} onChange={(e) => handleFormDataChange("cbm", e.target.value)} />
+                  </div>
                 </div>
               </div>
-              
-              {/* 원화 입력 ➡️ 달러 변환 계산기 세션 */}
-              <div className="border-t pt-4 mt-2 space-y-3">
+
+              {/* 무게 정보 */}
+              <div className="col-span-2 grid grid-cols-2 gap-4 border-t pt-4 mt-2">
+                <div className="grid gap-2">
+                  <Label htmlFor="netWeight">{lang === "KO" ? "Net Weight (kg)" : "Net Weight (kg)"}</Label>
+                  <Input id="netWeight" type="number" placeholder="0.0" value={formData.netWeight} onChange={(e) => handleFormDataChange("netWeight", e.target.value)} />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="grossWeight">{lang === "KO" ? "Gross Weight (kg)" : "Gross Weight (kg)"}</Label>
+                  <Input id="grossWeight" type="number" placeholder="0.0" value={formData.grossWeight} onChange={(e) => handleFormDataChange("grossWeight", e.target.value)} />
+                </div>
+              </div>
+
+              {/* 본사 매입가 정보 */}
+              <div className="col-span-2 border-t pt-4 mt-2 space-y-3">
                 <h4 className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                  💵 {lang === "KO" ? "매입 단가 계산기 (원화 ➡️ 달러)" : "Cost Calculator (KRW ➡️ USD)"}
+                  💵 {lang === "KO" ? "본사매입가 계산기 (원화 ➡️ 달러)" : "HQ Purchase Price Calculator (KRW ➡️ USD)"}
                 </h4>
                 <div className="grid grid-cols-3 gap-2.5">
                   <div className="grid gap-1.5">
@@ -269,11 +431,6 @@ export default function ProductsPage() {
                     />
                   </div>
                 </div>
-                <p className="text-[10px] text-slate-500 italic mt-1 leading-relaxed">
-                  {lang === "KO" 
-                    ? `* 입력한 원화 매입가를 적용 환율로 나누어 최종 달러($) 단가를 실시간 계산합니다.` 
-                    : `* Computes final USD cost in real-time by dividing the KRW cost by the exchange rate.`}
-                </p>
               </div>
             </div>
             
@@ -296,26 +453,38 @@ export default function ProductsPage() {
         <Table>
           <TableHeader>
             <TableRow className="bg-muted/30">
-              <TableHead>{lang === "KO" ? "제품 코드" : "Code"}</TableHead>
-              <TableHead>{lang === "KO" ? "제품명" : "Product Name"}</TableHead>
-              <TableHead>{lang === "KO" ? "공급사" : "Vendor"}</TableHead>
-              <TableHead>{lang === "KO" ? "카테고리" : "Category"}</TableHead>
-              <TableHead className="text-right">{lang === "KO" ? "HQ 매입 단가" : "HQ Cost"}</TableHead>
+              <TableHead>{lang === "KO" ? "품목코드" : "Code"}</TableHead>
+              <TableHead>{lang === "KO" ? "품목명" : "Product Name"}</TableHead>
+              <TableHead>{lang === "KO" ? "품목 (분류)" : "Category"}</TableHead>
+              <TableHead>{lang === "KO" ? "규격" : "Specification"}</TableHead>
+              <TableHead>{lang === "KO" ? "공급사 / 제조사" : "Vendor / Maker"}</TableHead>
+              <TableHead className="text-right">{lang === "KO" ? "본사매입가" : "HQ Purchase Price"}</TableHead>
               <TableHead className="text-right">{lang === "KO" ? "관리" : "Manage"}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
-              <TableRow><TableCell colSpan={6} className="h-32 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-muted-foreground" /></TableCell></TableRow>
+              <TableRow><TableCell colSpan={7} className="h-32 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-muted-foreground" /></TableCell></TableRow>
             ) : products.map((product) => (
               <TableRow key={product.id}>
-                <TableCell className="font-mono text-xs">{product.id.substring(0,6)}</TableCell>
-                <TableCell className="font-medium">{product.name}</TableCell>
-                <TableCell><div className="flex items-center gap-1.5 text-sm"><Truck className="h-3.5 w-3.5 text-muted-foreground" />{product.vendor}</div></TableCell>
+                <TableCell className="font-mono text-xs font-bold">{product.productCode || product.id.substring(0,6)}</TableCell>
+                <TableCell>
+                  <div className="flex flex-col">
+                    <span className="font-semibold text-sm">{product.nameKo || product.name || "-"}</span>
+                    {product.nameEn && <span className="text-xs text-muted-foreground font-mono">{product.nameEn}</span>}
+                  </div>
+                </TableCell>
                 <TableCell><Badge variant="outline">{CATEGORIES.find(c => c.id === product.category)?.label || product.category}</Badge></TableCell>
+                <TableCell className="text-xs">{product.spec || "-"}</TableCell>
+                <TableCell>
+                  <div className="flex flex-col text-xs text-slate-700">
+                    <span className="flex items-center gap-1"><Truck className="h-3 w-3 text-muted-foreground" /> {product.vendor || "-"}</span>
+                    {product.maker && <span className="text-[10px] text-muted-foreground pl-4">Mfg: {product.maker}</span>}
+                  </div>
+                </TableCell>
                 <TableCell className="text-right">
                   <div className="flex flex-col items-end gap-0.5">
-                    <span className="font-semibold text-sm">${parseFloat(product.cost || product.baseCost || 0).toFixed(2)}</span>
+                    <span className="font-semibold text-sm">${parseFloat(product.cost || 0).toFixed(2)}</span>
                     {product.costKrw ? (
                       <span className="text-[10px] text-muted-foreground font-mono">
                         ₩{parseInt(product.costKrw).toLocaleString()} ({product.exchangeRate || 1340})
@@ -333,6 +502,20 @@ export default function ProductsPage() {
                       const initialRate = product.exchangeRate || systemExchangeRate || 1340;
                       const initialCostKrw = product.costKrw || (product.cost ? Math.round(parseFloat(product.cost) * initialRate).toString() : "");
                       setEditingProduct({ 
+                        productCode: product.productCode || "",
+                        nameKo: product.nameKo || "",
+                        nameEn: product.nameEn || "",
+                        maker: product.maker || "",
+                        country: product.country || "",
+                        expiration: product.expiration || "",
+                        spec: product.spec || "",
+                        netVolume: product.netVolume || "",
+                        width: product.width !== undefined ? product.width.toString() : "",
+                        length: product.length !== undefined ? product.length.toString() : "",
+                        height: product.height !== undefined ? product.height.toString() : "",
+                        cbm: product.cbm !== undefined ? product.cbm.toString() : "",
+                        netWeight: product.netWeight !== undefined ? product.netWeight.toString() : "",
+                        grossWeight: product.grossWeight !== undefined ? product.grossWeight.toString() : "",
                         ...product, 
                         exchangeRate: initialRate.toString(),
                         costKrw: initialCostKrw
@@ -349,45 +532,112 @@ export default function ProductsPage() {
       </div>
 
       <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
-        <DialogContent className="sm:max-w-[450px]">
+        <DialogContent className="sm:max-w-[700px] max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{lang === "KO" ? "제품 정보 수정" : "Edit Product"}</DialogTitle>
             <DialogDescription>{lang === "KO" ? "공급처 및 제품 상세 정보를 수정합니다." : "Update product and vendor details."}</DialogDescription>
           </DialogHeader>
           
           {editingProduct && (
-            <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-2 gap-4 py-4">
               <div className="grid gap-2">
                 <Label>{lang === "KO" ? "제품 코드" : "Product ID"}</Label>
                 <Input value={editingProduct.id} disabled className="bg-muted font-mono" />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="edit-name">{lang === "KO" ? "제품명" : "Product Name"}</Label>
-                <Input id="edit-name" value={editingProduct.name} onChange={(e) => setEditingProduct({...editingProduct, name: e.target.value})} />
+                <Label htmlFor="edit-productCode">{lang === "KO" ? "품목코드" : "Item Code"}</Label>
+                <Input id="edit-productCode" value={editingProduct.productCode} onChange={(e) => handleEditingProductChange("productCode", e.target.value)} />
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="edit-nameKo">{lang === "KO" ? "품목명 (국문)" : "Product Name (Ko)"}</Label>
+                <Input id="edit-nameKo" value={editingProduct.nameKo} onChange={(e) => handleEditingProductChange("nameKo", e.target.value)} />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="edit-vendor">{lang === "KO" ? "공급사" : "Vendor"}</Label>
-                <Input id="edit-vendor" value={editingProduct.vendor} onChange={(e) => setEditingProduct({...editingProduct, vendor: e.target.value})} />
+                <Label htmlFor="edit-nameEn">{lang === "KO" ? "품목명 (영문)" : "Product Name (En)"}</Label>
+                <Input id="edit-nameEn" value={editingProduct.nameEn} onChange={(e) => handleEditingProductChange("nameEn", e.target.value)} />
               </div>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2 col-span-2">
-                  <Label htmlFor="edit-category">{lang === "KO" ? "카테고리" : "Category"}</Label>
-                  <select 
-                    id="edit-category"
-                    className="flex h-10 w-full rounded-lg border border-input bg-transparent px-3 py-1 text-sm outline-none focus-visible:border-ring focus-visible:ring-3"
-                    value={editingProduct.category}
-                    onChange={(e) => setEditingProduct({...editingProduct, category: e.target.value})}
-                  >
-                    {CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
-                  </select>
+
+              <div className="grid gap-2">
+                <Label htmlFor="edit-vendor">{lang === "KO" ? "공급사" : "Vendor"}</Label>
+                <Input id="edit-vendor" value={editingProduct.vendor} onChange={(e) => handleEditingProductChange("vendor", e.target.value)} />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-maker">{lang === "KO" ? "제조사명" : "Manufacturer"}</Label>
+                <Input id="edit-maker" value={editingProduct.maker} onChange={(e) => handleEditingProductChange("maker", e.target.value)} />
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="edit-country">{lang === "KO" ? "제조국가" : "Country of Origin"}</Label>
+                <Input id="edit-country" value={editingProduct.country} onChange={(e) => handleEditingProductChange("country", e.target.value)} />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-expiration">{lang === "KO" ? "소비기한" : "Shelf Life"}</Label>
+                <Input id="edit-expiration" value={editingProduct.expiration} onChange={(e) => handleEditingProductChange("expiration", e.target.value)} />
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="edit-spec">{lang === "KO" ? "규격" : "Specification"}</Label>
+                <Input id="edit-spec" value={editingProduct.spec} onChange={(e) => handleEditingProductChange("spec", e.target.value)} />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-netVolume">{lang === "KO" ? "제품 순증량" : "Net Content"}</Label>
+                <Input id="edit-netVolume" value={editingProduct.netVolume} onChange={(e) => handleEditingProductChange("netVolume", e.target.value)} />
+              </div>
+
+              <div className="grid gap-2 col-span-2">
+                <Label htmlFor="edit-category">{lang === "KO" ? "품목" : "Category"}</Label>
+                <select 
+                  id="edit-category"
+                  className="flex h-10 w-full rounded-lg border border-input bg-transparent px-3 py-1 text-sm outline-none focus-visible:border-ring focus-visible:ring-3"
+                  value={editingProduct.category}
+                  onChange={(e) => handleEditingProductChange("category", e.target.value)}
+                >
+                  {CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                </select>
+              </div>
+
+              {/* 포장 박스 규격 정보 */}
+              <div className="col-span-2 border-t pt-4 mt-2">
+                <h4 className="text-xs font-bold text-slate-700 mb-3">
+                  📦 {lang === "KO" ? "포장 박스 크기 및 CBM" : "Box Dimensions & CBM"}
+                </h4>
+                <div className="grid grid-cols-4 gap-3">
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="edit-width" className="text-[11px] text-muted-foreground">{lang === "KO" ? "가로 (cm)" : "Width (cm)"}</Label>
+                    <Input id="edit-width" type="number" placeholder="0" value={editingProduct.width} onChange={(e) => handleEditingProductChange("width", e.target.value)} />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="edit-length" className="text-[11px] text-muted-foreground">{lang === "KO" ? "세로 (cm)" : "Length (cm)"}</Label>
+                    <Input id="edit-length" type="number" placeholder="0" value={editingProduct.length} onChange={(e) => handleEditingProductChange("length", e.target.value)} />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="edit-height" className="text-[11px] text-muted-foreground">{lang === "KO" ? "높이 (cm)" : "Height (cm)"}</Label>
+                    <Input id="edit-height" type="number" placeholder="0" value={editingProduct.height} onChange={(e) => handleEditingProductChange("height", e.target.value)} />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="edit-cbm" className="text-[11px] text-primary font-bold">{lang === "KO" ? "CBM (자동)" : "CBM (Auto)"}</Label>
+                    <Input id="edit-cbm" type="number" placeholder="0.0000" className="border-primary/50 bg-primary/5 font-mono" value={editingProduct.cbm} onChange={(e) => handleEditingProductChange("cbm", e.target.value)} />
+                  </div>
+                </div>
+              </div>
+
+              {/* 무게 정보 */}
+              <div className="col-span-2 grid grid-cols-2 gap-4 border-t pt-4 mt-2">
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-netWeight">{lang === "KO" ? "Net Weight (kg)" : "Net Weight (kg)"}</Label>
+                  <Input id="edit-netWeight" type="number" placeholder="0.0" value={editingProduct.netWeight} onChange={(e) => handleEditingProductChange("netWeight", e.target.value)} />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-grossWeight">{lang === "KO" ? "Gross Weight (kg)" : "Gross Weight (kg)"}</Label>
+                  <Input id="edit-grossWeight" type="number" placeholder="0.0" value={editingProduct.grossWeight} onChange={(e) => handleEditingProductChange("grossWeight", e.target.value)} />
                 </div>
               </div>
 
               {/* 원화 입력 ➡️ 달러 변환 계산기 세션 (수정 모드) */}
-              <div className="border-t pt-4 mt-2 space-y-3">
+              <div className="col-span-2 border-t pt-4 mt-2 space-y-3">
                 <h4 className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                  💵 {lang === "KO" ? "매입 단가 계산기 (원화 ➡️ 달러)" : "Cost Calculator (KRW ➡️ USD)"}
+                  💵 {lang === "KO" ? "본사매입가 계산기 (원화 ➡️ 달러)" : "HQ Purchase Price Calculator (KRW ➡️ USD)"}
                 </h4>
                 <div className="grid grid-cols-3 gap-2.5">
                   <div className="grid gap-1.5">
@@ -422,11 +672,6 @@ export default function ProductsPage() {
                     />
                   </div>
                 </div>
-                <p className="text-[10px] text-slate-500 italic mt-1 leading-relaxed">
-                  {lang === "KO" 
-                    ? `* 입력한 원화 매입가를 적용 환율로 나누어 최종 달러($) 단가를 실시간 계산합니다.` 
-                    : `* Computes final USD cost in real-time by dividing the KRW cost by the exchange rate.`}
-                </p>
               </div>
             </div>
           )}
