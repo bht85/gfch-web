@@ -21,6 +21,42 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Loader2, Plus, Edit2, Trash2, Search, Truck } from "lucide-react";
 
+// CSV 헬퍼 함수
+const escapeCSV = (val: any) => {
+  if (val === undefined || val === null) return '""';
+  let str = val.toString();
+  str = str.replace(/"/g, '""');
+  return `"${str}"`;
+};
+
+const parseCSVLine = (text: string) => {
+  const result = [];
+  let start = 0;
+  let inQuotes = false;
+  
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === ',' && !inQuotes) {
+      let segment = text.substring(start, i).trim();
+      if (segment.startsWith('"') && segment.endsWith('"')) {
+        segment = segment.substring(1, segment.length - 1).replace(/""/g, '"');
+      }
+      result.push(segment);
+      start = i + 1;
+    }
+  }
+  
+  let segment = text.substring(start).trim();
+  if (segment.startsWith('"') && segment.endsWith('"')) {
+    segment = segment.substring(1, segment.length - 1).replace(/""/g, '"');
+  }
+  result.push(segment);
+  
+  return result;
+};
+
 // 카테고리 정의
 const getCategories = (lang: string) => [
   { id: "RAW", label: lang === "KO" ? "식자재" : "Food Ingredient" },
@@ -279,6 +315,207 @@ export default function ProductsPage() {
     }
   };
 
+  // CSV 다운로드 (Export)
+  const handleDownloadCSV = () => {
+    const headers = [
+      "품목코드", "품목분류", "품목명(국문)", "품목명(영문)", "공급사", 
+      "제조사명", "제조국가", "소비기한", "규격", "제품 순증량", 
+      "가로(cm)", "세로(cm)", "높이(cm)", "CBM", "Net Weight(kg)", 
+      "Gross Weight(kg)", "본사매입가(원화)", "적용환율", "본사매입가(달러)"
+    ];
+
+    const rows = products.map(p => {
+      const catLabel = CATEGORIES.find(c => c.id === p.category)?.label || p.category || "";
+      return [
+        p.productCode || "",
+        catLabel,
+        p.nameKo || "",
+        p.nameEn || "",
+        p.vendor || "",
+        p.maker || "",
+        p.country || "",
+        p.expiration || "",
+        p.spec || "",
+        p.netVolume || "",
+        p.width || 0,
+        p.length || 0,
+        p.height || 0,
+        p.cbm || 0,
+        p.netWeight || 0,
+        p.grossWeight || 0,
+        p.costKrw || 0,
+        p.exchangeRate || 1340,
+        p.cost || 0
+      ].map(escapeCSV).join(",");
+    });
+
+    const csvContent = "\uFEFF" + [headers.join(","), ...rows].join("\r\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `product_master_${new Date().toISOString().slice(0,10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // CSV 템플릿 다운로드
+  const handleDownloadTemplate = () => {
+    const headers = [
+      "품목코드", "품목분류", "품목명(국문)", "품목명(영문)", "공급사", 
+      "제조사명", "제조국가", "소비기한", "규격", "제품 순증량", 
+      "가로(cm)", "세로(cm)", "높이(cm)", "CBM", "Net Weight(kg)", 
+      "Gross Weight(kg)", "본사매입가(원화)", "적용환율", "본사매입가(달러)"
+    ];
+    
+    const sampleRow = [
+      "PA-001", "포장재", "종이컵 10oz", "Paper Cup 10oz", "GFCH Supply",
+      "GFCH Manuf", "대한민국", "제조일로부터 24개월", "1000개/Box", "10.5kg",
+      "40", "30", "50", "0.0600", "10.5", "11.2",
+      "25000", "1340", "18.66"
+    ].map(escapeCSV).join(",");
+
+    const csvContent = "\uFEFF" + [headers.join(","), sampleRow].join("\r\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", "product_master_template.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // CSV 업로드 및 Firestore 연동
+  const handleUploadCSV = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      const text = evt.target?.result as string;
+      if (!text) return;
+
+      const lines = text.split(/\r\n|\n/);
+      if (lines.length <= 1) {
+        alert(lang === "KO" ? "업로드할 데이터가 없습니다." : "No data to upload.");
+        return;
+      }
+
+      let successCount = 0;
+      let updateCount = 0;
+      let errorCount = 0;
+
+      setLoading(true);
+      
+      const categoryMap: Record<string, string> = {
+        "식자재": "RAW",
+        "Food Ingredient": "RAW",
+        "포장재": "PACKAGING",
+        "Packaging": "PACKAGING",
+        "유니폼": "UNIFORM",
+        "Uniform": "UNIFORM",
+        "소모품": "CONSUMABLE",
+        "Consumable": "CONSUMABLE",
+        "장비": "EQUIPMENT",
+        "Equipment": "EQUIPMENT",
+        "장비부품": "EQUIPMENT_PARTS",
+        "Equipment Parts": "EQUIPMENT_PARTS"
+      };
+
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+
+        const cols = parseCSVLine(line);
+        if (cols.length < 3) {
+          errorCount++;
+          continue;
+        }
+
+        const productCode = cols[0]?.trim() || "";
+        const catName = cols[1]?.trim() || "식자재";
+        const nameKo = cols[2]?.trim() || "";
+        const nameEn = cols[3]?.trim() || "";
+        const vendor = cols[4]?.trim() || "Seoul Logistics";
+        const maker = cols[5]?.trim() || "";
+        const country = cols[6]?.trim() || "";
+        const expiration = cols[7]?.trim() || "";
+        const spec = cols[8]?.trim() || "";
+        const netVolume = cols[9]?.trim() || "";
+        
+        const width = parseFloat(cols[10]) || 0;
+        const length = parseFloat(cols[11]) || 0;
+        const height = parseFloat(cols[12]) || 0;
+        const cbm = parseFloat(cols[13]) || 0;
+        const netWeight = parseFloat(cols[14]) || 0;
+        const grossWeight = parseFloat(cols[15]) || 0;
+
+        const costKrw = parseFloat(cols[16]) || 0;
+        const exchangeRate = parseFloat(cols[17]) || 1340;
+        const cost = parseFloat(cols[18]) || 0;
+
+        if (!nameKo && !nameEn) {
+          errorCount++;
+          continue;
+        }
+
+        const combinedName = nameKo && nameEn ? `${nameKo} (${nameEn})` : (nameKo || nameEn);
+        const categoryId = categoryMap[catName] || "RAW";
+
+        const dataToSave = {
+          productCode,
+          category: categoryId,
+          name: combinedName,
+          nameKo,
+          nameEn,
+          vendor,
+          maker,
+          country,
+          expiration,
+          spec,
+          netVolume,
+          width,
+          length,
+          height,
+          cbm,
+          netWeight,
+          grossWeight,
+          costKrw,
+          exchangeRate,
+          cost
+        };
+
+        try {
+          const existingProduct = products.find(p => p.productCode && p.productCode === productCode);
+
+          if (existingProduct) {
+            await updateDoc(doc(db, "products", existingProduct.id), dataToSave);
+            updateCount++;
+          } else {
+            await addDoc(collection(db, "products"), dataToSave);
+            successCount++;
+          }
+        } catch (err) {
+          console.error("Error saving product from CSV line:", line, err);
+          errorCount++;
+        }
+      }
+
+      setLoading(false);
+      alert(
+        lang === "KO"
+          ? `업로드 완료! (신규 등록: ${successCount}건, 정보 수정: ${updateCount}건, 실패: ${errorCount}건)`
+          : `Upload completed! (New: ${successCount}, Updated: ${updateCount}, Failed: ${errorCount})`
+      );
+
+      e.target.value = "";
+    };
+
+    reader.readAsText(file);
+  };
+
   if (authLoading || (user && user.role !== "HQ")) {
     return <div className="h-96 flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
   }
@@ -293,9 +530,31 @@ export default function ProductsPage() {
           </p>
         </div>
         
-        <Button onClick={() => setIsAddModalOpen(true)}>
-          <Plus className="mr-2 h-4 w-4" /> {lang === "KO" ? "새 제품 등록" : "Add New Product"}
-        </Button>
+        <div className="flex items-center gap-2">
+          <input 
+            type="file" 
+            id="csv-file-input" 
+            accept=".csv" 
+            className="hidden" 
+            onChange={handleUploadCSV}
+          />
+          
+          <Button variant="outline" onClick={handleDownloadTemplate}>
+            {lang === "KO" ? "템플릿 다운로드" : "Download Template"}
+          </Button>
+          
+          <Button variant="outline" onClick={handleDownloadCSV}>
+            {lang === "KO" ? "CSV 다운로드" : "Export CSV"}
+          </Button>
+
+          <Button variant="outline" onClick={() => document.getElementById("csv-file-input")?.click()}>
+            {lang === "KO" ? "CSV 업로드" : "Import CSV"}
+          </Button>
+
+          <Button onClick={() => setIsAddModalOpen(true)}>
+            <Plus className="mr-2 h-4 w-4" /> {lang === "KO" ? "새 제품 등록" : "Add New Product"}
+          </Button>
+        </div>
         <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
           <DialogContent className="sm:max-w-[700px] max-h-[85vh] overflow-y-auto">
             <DialogHeader>
