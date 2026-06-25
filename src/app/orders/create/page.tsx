@@ -20,8 +20,16 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 
+type Incoterm = "FOB" | "CIF" | "EXW";
+
+const INCOTERMS: { key: Incoterm; label: string; desc: string; color: string; bg: string; border: string }[] = [
+  { key: "FOB", label: "FOB", desc: "본선 선적까지 HQ 부담",       color: "text-blue-700",   bg: "bg-blue-50",   border: "border-blue-200" },
+  { key: "CIF", label: "CIF", desc: "도착항 보험·운임 HQ 포함",    color: "text-violet-700", bg: "bg-violet-50", border: "border-violet-200" },
+  { key: "EXW", label: "EXW", desc: "공장 출고 이후 전비용 MF 부담", color: "text-amber-700",  bg: "bg-amber-50",  border: "border-amber-200" },
+];
+
 const formSchema = z.object({
-  shippingMethod: z.string().min(1, "배송 방법을 선택해주세요"),
+  incoterms: z.enum(["FOB", "CIF", "EXW"]),
   notes: z.string().optional()
 });
 
@@ -50,7 +58,7 @@ export default function PlaceOrderPage() {
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      shippingMethod: "SEA",
+      incoterms: "FOB",
       notes: ""
     }
   });
@@ -113,34 +121,106 @@ export default function PlaceOrderPage() {
     fetchProducts();
   }, []);
 
-  // 파트너 정보 식별 (HQ 대리 발주 vs 일반 파트너 직접 발주)
-  const currentPartner = isHQ 
+  // 파트너 정보 식별 (HQ 대리 발주 vs MF 파트너 직접 발주)
+  const [mfPartnerDocId, setMfPartnerDocId] = useState<string>("");
+
+  useEffect(() => {
+    if (isHQ || !user) return;
+    
+    // 신규 계정: user.role이 이미 파트너 문서 ID인 경우
+    if (user.role && user.role !== "MF" && user.role !== "HQ") {
+      setMfPartnerDocId(user.role);
+      return;
+    }
+
+    // 구형 계정 (user.role === "MF"): 파트너 코드로 역추적
+    const q = query(collection(db, "partners"));
+    const unsub = onSnapshot(q, (snap: any) => {
+      // 1순위: 이메일 또는 UID 매칭
+      let matched = snap.docs.find((d: any) => {
+        const data = d.data();
+        const hasMatchingEmail = data.contacts && Array.isArray(data.contacts) && data.contacts.some((c: any) => 
+          c.email && user.email && c.email.trim().toLowerCase() === user.email.trim().toLowerCase()
+        );
+        return data.uid === user.uid || hasMatchingEmail;
+      });
+
+      // 2순위: 파트너 코드로 매칭
+      if (!matched) {
+        matched = snap.docs.find((d: any) => {
+          const data = d.data();
+          return (user.partnerCode && data.code === user.partnerCode) ||
+                 (user.partnerCode && data.partnerCode === user.partnerCode);
+        });
+      }
+
+      if (matched) {
+        setMfPartnerDocId(matched.id);
+      }
+    });
+    return () => unsub();
+  }, [isHQ, user]);
+
+  const currentPartner = isHQ
     ? (dbPartners.find(p => p.id === selectedPartnerId) || dbPartners[0] || { id: "", name: "", code: "" })
     : {
-        id: user?.role || "MF-02",
-        name: user?.name || "Vietnam Food Corp",
-        code: user?.partnerCode || "VNM"
+        id: mfPartnerDocId || user?.role || "",
+        name: user?.name || "MF Partner",
+        code: user?.partnerCode || ""
       };
 
-  // 🔒 파트너 전용 커스텀 판매가 정보 실시간 로드 (Phase 3)
-  const [customPrices, setCustomPrices] = useState<Record<string, number>>({});
+
+  // 파트너 전용 Incoterms별 판매가 실시간 로드
+  const [allIncoTermPrices, setAllIncoTermPrices] = useState<Record<Incoterm, Record<string, number>>>({ FOB: {}, CIF: {}, EXW: {} });
+  // form.watch 대신 독립 state 사용 → 버튼 클릭 시 상품 테이블 즉시 리렌더 보장
+  const [selectedIncoterms, setSelectedIncoterms] = useState<Incoterm>("FOB");
+  const [allowedIncoterms, setAllowedIncoterms] = useState<Record<Incoterm, boolean>>({ FOB: true, CIF: true, EXW: true });
+
   useEffect(() => {
     if (!currentPartner.id) return;
     const priceDocRef = doc(db, "prices", currentPartner.id);
     const unsubscribe = onSnapshot(priceDocRef, (docSnap: any) => {
       if (docSnap.exists()) {
-        setCustomPrices(docSnap.data().prices || {});
+        const data = docSnap.data();
+        setAllIncoTermPrices({
+          FOB: data.incoterms?.FOB || data.prices || {},
+          CIF: data.incoterms?.CIF || {},
+          EXW: data.incoterms?.EXW || {},
+        });
+        // 파트너사 기본 무역조건 자동 세팅
+        if (data.defaultIncoterms) {
+          form.setValue("incoterms", data.defaultIncoterms as Incoterm);
+          setSelectedIncoterms(data.defaultIncoterms as Incoterm);
+        }
+        
+        if (data.allowedIncoterms) {
+          setAllowedIncoterms(data.allowedIncoterms);
+          // 만약 현재 선택된 무역조건이 허용되지 않은 것이라면 강제 변경
+          const currentVal = data.defaultIncoterms || form.getValues("incoterms") || "FOB";
+          if (!data.allowedIncoterms[currentVal]) {
+            const firstAllowed = INCOTERMS.find(t => data.allowedIncoterms[t.key])?.key as Incoterm;
+            if (firstAllowed) {
+              form.setValue("incoterms", firstAllowed);
+              setSelectedIncoterms(firstAllowed);
+            }
+          }
+        } else {
+          setAllowedIncoterms({ FOB: true, CIF: true, EXW: true });
+        }
       } else {
-        setCustomPrices({});
+        setAllIncoTermPrices({ FOB: {}, CIF: {}, EXW: {} });
+        setAllowedIncoterms({ FOB: true, CIF: true, EXW: true });
       }
     });
     return () => unsubscribe();
   }, [currentPartner.id]);
 
   const getProductPrice = (product: Product) => {
-    if (customPrices && customPrices[product.id] !== undefined) {
-      return customPrices[product.id];
-    }
+    const termPrices = allIncoTermPrices[selectedIncoterms] || {};
+    if (termPrices[product.id] !== undefined) return termPrices[product.id];
+    // fallback: FOB 가격 → 상품 기본가
+    const fobPrices = allIncoTermPrices["FOB"] || {};
+    if (fobPrices[product.id] !== undefined) return fobPrices[product.id];
     return product.price || (product.cost ? product.cost * 1.2 : 0);
   };
 
@@ -209,7 +289,7 @@ export default function PlaceOrderPage() {
         totalAmount: totalAmount, // 숫자형 원본 금액
         status: "PENDING", // 승인 대기
         paymentStatus: "UNPAID",
-        shippingMethod: values.shippingMethod,
+        incoterms: values.incoterms,
         notes: values.notes || "",
         receiptUrl: "",
         documents: {}, // 객체 형태로 호환성 높임
@@ -309,6 +389,9 @@ export default function PlaceOrderPage() {
                   <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700 text-xs px-3 py-1 font-semibold">
                     {currentPartner.name} ({currentPartner.code})
                   </Badge>
+                  <span className="text-[10px] text-muted-foreground hidden sm:inline-block">
+                    ID: {currentPartner.id}
+                  </span>
                 </div>
               )}
             </div>
@@ -438,22 +521,41 @@ export default function PlaceOrderPage() {
               <div className="space-y-4 pt-4 border-t border-dashed">
                 <FormField
                   control={form.control}
-                  name="shippingMethod"
+                  name="incoterms"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-xs font-bold">{lang === "KO" ? "배송 방법 (Shipping)" : "Shipping Method"}</FormLabel>
-                      <Select onValueChange={field.onChange} defaultValue={field.value}>
-                        <FormControl>
-                          <SelectTrigger className="text-xs h-9">
-                            <SelectValue placeholder="Select shipping method" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value="SEA">해운 (Ocean Freight) - 기본</SelectItem>
-                          <SelectItem value="AIR">항공 (Air Freight) - 추가 비용</SelectItem>
-                          <SelectItem value="DHL">국제특송 (DHL/FedEx)</SelectItem>
-                        </SelectContent>
-                      </Select>
+                      <FormLabel className="text-xs font-bold">
+                        {lang === "KO" ? "무역조건 (Incoterms)" : "Trade Terms (Incoterms)"}
+                      </FormLabel>
+                      <div className="flex gap-1.5">
+                        {INCOTERMS.map((term) => {
+                          if (!allowedIncoterms[term.key]) return null;
+                          return (
+                            <button
+                              key={term.key}
+                              type="button"
+                              onClick={() => {
+                                field.onChange(term.key);
+                                setSelectedIncoterms(term.key);
+                              }}
+                              className={cn(
+                                "flex-1 py-2 rounded-lg border-2 text-xs font-bold transition-all",
+                                field.value === term.key
+                                  ? cn(term.bg, term.border, term.color)
+                                  : "border-border text-muted-foreground hover:bg-muted"
+                              )}
+                            >
+                              {term.key}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {(() => {
+                        const t = INCOTERMS.find((t) => t.key === field.value);
+                        return t ? (
+                          <p className={cn("text-[10px] mt-1", t.color)}>{t.desc}</p>
+                        ) : null;
+                      })()}
                       <FormMessage />
                     </FormItem>
                   )}

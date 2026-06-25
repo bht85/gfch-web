@@ -112,5 +112,24 @@ service cloud.firestore {
       allow read: if request.auth != null;
       allow write: if request.auth != null && isHQ();
     }
+
+    // 12. 해외 매장 오픈 관리 컬렉션 (Store Openings)
+    match /storeOpenings/{storeId} {
+      // HQ는 전체 조회, MF 파트너는 본인 partnerId와 연결된 매장만 조회 가능
+      allow read: if request.auth != null && (
+        isHQ() ||
+        resource.data.partnerId == request.auth.uid ||
+        resource.data.partnerId == getUserData().role
+      );
+      // 생성 및 삭제는 HQ 전용
+      allow create, delete: if request.auth != null && isHQ();
+      // 수정: HQ는 전체 필드, 파트너는 교육/시공 관련 제한 필드만 허용
+      allow update: if request.auth != null && (
+        isHQ() || (
+          (resource.data.partnerId == request.auth.uid || resource.data.partnerId == getUserData().role) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['training', 'interior'])
+        )
+      );
+    }
   }
 }

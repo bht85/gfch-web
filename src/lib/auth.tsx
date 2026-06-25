@@ -53,7 +53,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const userDoc = await Promise.race([docPromise, timeoutPromise]);
 
           if (userDoc.exists()) {
-            setUser(userDoc.data() as User);
+            const data = userDoc.data();
+            setUser({
+              ...data,
+              email: data.email || firebaseUser.email || ""
+            } as User);
           } else {
             // 💡 예외 처리: hq-admin@gfch.com이 생성되어 있으나 DB가 비어있는 경우 자동 등록 (락아웃 방지)
             if (firebaseUser.email === "hq-admin@gfch.com") {
