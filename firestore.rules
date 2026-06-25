@@ -21,17 +21,21 @@ service cloud.firestore {
     match /orders/{orderId} {
       // 본사 관리자는 전체 조회 가능, MF 파트너는 자기 주문만 조회 가능
       allow read: if request.auth != null && (
-        isHQ() || resource.data.partnerId == getUserData().role
+        isHQ() || 
+        resource.data.partnerId == getUserData().role || 
+        resource.data.partnerId == request.auth.uid
       );
       
       // 본사 관리자만 생성 및 모든 수정 가능
       allow create, update: if request.auth != null && isHQ();
       
       // 특정 문서 업로드 등 일부 필드는 파트너 본인도 수정(업로드) 가능하도록 허용
-      allow update: if request.auth != null && 
-        resource.data.partnerId == getUserData().role && 
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['documents', 'paymentStatus', 'receiptUrl']);
-        
+      allow update: if request.auth != null && (
+        resource.data.partnerId == getUserData().role || 
+        resource.data.partnerId == request.auth.uid
+      ) && 
+      request.resource.data.diff(resource.data).affectedKeys().hasOnly(['documents', 'paymentStatus', 'receiptUrl']);
+         
       // 주문 삭제는 절대 불가 (본사 포함 - 히스토리 무결성 보장)
       allow delete: if false;
     }
@@ -84,12 +88,14 @@ service cloud.firestore {
     // 8. 로열티 정산 컬렉션 (Royalties)
     match /royalties/{royaltyId} {
       allow read: if request.auth != null && (
-        isHQ() || resource.data.partnerId == getUserData().role
+        isHQ() || 
+        resource.data.partnerId == getUserData().role || 
+        resource.data.partnerId == request.auth.uid
       );
       allow create, update: if request.auth != null && (
         isHQ() || (
-          request.resource.data.partnerId == getUserData().role &&
-          (resource == null || resource.data.partnerId == getUserData().role)
+          (request.resource.data.partnerId == getUserData().role || request.resource.data.partnerId == request.auth.uid) &&
+          (resource == null || resource.data.partnerId == getUserData().role || resource.data.partnerId == request.auth.uid)
         )
       );
       allow delete: if request.auth != null && isHQ();
