@@ -115,6 +115,7 @@ export default function ProductsPage() {
 
   // 1. 시스템 기준 환율 로드
   useEffect(() => {
+    if (!user) return;
     async function loadSystemConfig() {
       try {
         const docRef = doc(db, "system", "config");
@@ -129,18 +130,22 @@ export default function ProductsPage() {
       }
     }
     loadSystemConfig();
-  }, []);
+  }, [user]);
 
   // 2. Firestore 실시간 조회
   useEffect(() => {
+    if (!user) return;
     const q = query(collection(db, "products"), orderBy("name", "asc"));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setProducts(data);
       setLoading(false);
+    }, (err) => {
+      console.error("Error subscribing to products:", err);
+      setLoading(false);
     });
     return () => unsubscribe();
-  }, []);
+  }, [user]);
 
   // 새 제품 등록용 원화/환율 실시간 달러 환산 및 CBM 계산 핸들러
   const handleFormDataChange = (field: string, value: any) => {

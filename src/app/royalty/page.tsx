@@ -53,12 +53,25 @@ export default function RoyaltyPage() {
   const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
 
-  // HQ specific states
+  // HQ specific states & new royalty fields
   const [isHQAddOpen, setIsHQAddOpen] = useState(false);
   const [selectedPartnerId, setSelectedPartnerId] = useState("");
   const [manualMonth, setManualMonth] = useState("");
-  const [manualSales, setManualSales] = useState("");
+  const [billingMonth, setBillingMonth] = useState("");
+  const [selectedCountry, setSelectedCountry] = useState("");
+  const [partnerStores, setPartnerStores] = useState<string[]>([]);
+  const [selectedStore, setSelectedStore] = useState("");
+  const [grossSalesLocal, setGrossSalesLocal] = useState("");
+  const [netSalesLocal, setNetSalesLocal] = useState("");
   const [manualRate, setManualRate] = useState("3.5");
+  const [royaltyAmountUsd, setRoyaltyAmountUsd] = useState("");
+  const [manualWithholdingTaxRate, setManualWithholdingTaxRate] = useState(0);
+
+  // New Evidence upload files states
+  const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
+  const [remittanceFile, setRemittanceFile] = useState<File | null>(null);
+  const [salesEvidenceFile, setSalesEvidenceFile] = useState<File | null>(null);
+  const [withholdingTaxFile, setWithholdingTaxFile] = useState<File | null>(null);
 
   // Evidence-only upload/update states
   const [isUploadEvidenceOpen, setIsUploadEvidenceOpen] = useState(false);
@@ -83,8 +96,14 @@ export default function RoyaltyPage() {
   const [voucherFile, setVoucherFile] = useState<File | null>(null);
   const [uploadingVoucher, setUploadingVoucher] = useState(false);
 
+  // Unified Document Center States
+  const [isDocumentCenterOpen, setIsDocumentCenterOpen] = useState(false);
+  const [selectedRoyaltyForDocs, setSelectedRoyaltyForDocs] = useState<any>(null);
+  const [uploadingDocType, setUploadingDocType] = useState<'invoice' | 'evidence' | 'remittance' | 'withholding' | null>(null);
+
   // Load configuration & dynamic references
   useEffect(() => {
+    if (!user) return;
     async function loadSystemConfig() {
       try {
         const docRef = doc(db, "system", "config");
@@ -97,7 +116,7 @@ export default function RoyaltyPage() {
       }
     }
     loadSystemConfig();
-  }, []);
+  }, [user]);
 
   // Real-time subscription to royalties
   useEffect(() => {
@@ -135,23 +154,55 @@ export default function RoyaltyPage() {
     return () => unsubscribe();
   }, []);
 
-  // Fetch partner's specific contract rate if not HQ
+  // 파트너사 선택 시 로열티율, 원천징수율, 국가명, 매장목록 자동 연동
+  useEffect(() => {
+    if (!selectedPartnerId) {
+      setManualRate("3.5");
+      setManualWithholdingTaxRate(0);
+      setSelectedCountry("");
+      setPartnerStores([]);
+      setSelectedStore("");
+      return;
+    }
+    const partner = partners.find(p => p.id === selectedPartnerId);
+    if (partner) {
+      setManualRate(partner.royaltyRate !== undefined ? partner.royaltyRate.toString() : "3.5");
+      setManualWithholdingTaxRate(partner.withholdingTaxRate !== undefined ? partner.withholdingTaxRate : 0);
+      setSelectedCountry(partner.country || "");
+      const stores = partner.stores || [];
+      setPartnerStores(stores);
+      setSelectedStore(stores[0] || "");
+    }
+  }, [selectedPartnerId, partners]);
+
+  // Fetch partner's specific details if not HQ
   useEffect(() => {
     if (user && user.role !== "HQ") {
-      const fetchPartnerRate = async () => {
+      const fetchPartnerData = async () => {
         try {
           const docSnap = await getDoc(doc(db, "partners", user.role));
           if (docSnap.exists()) {
             const data = docSnap.data();
             if (data.royaltyRate !== undefined) {
               setPartnerContractRate(Number(data.royaltyRate));
+              setManualRate(data.royaltyRate.toString());
+            }
+            if (data.withholdingTaxRate !== undefined) {
+              setManualWithholdingTaxRate(Number(data.withholdingTaxRate));
+            }
+            if (data.country) {
+              setSelectedCountry(data.country);
+            }
+            if (data.stores) {
+              setPartnerStores(data.stores);
+              setSelectedStore(data.stores[0] || "");
             }
           }
         } catch (err) {
-          console.error("Error fetching partner contract rate:", err);
+          console.error("Error fetching partner details:", err);
         }
       };
-      fetchPartnerRate();
+      fetchPartnerData();
     }
   }, [user]);
 
@@ -171,14 +222,30 @@ export default function RoyaltyPage() {
   // Partner royalty declaration submit handler
   const handlePartnerDeclare = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user || !declareMonth || !declareSales) {
-      alert("모든 필드를 입력해 주세요.");
+    if (!user || !declareMonth || !billingMonth || !netSalesLocal) {
+      alert("정산월, 청구월, Net Sales는 필수 기입사항입니다.");
       return;
     }
 
-    const posSales = parseFloat(declareSales.replace(/[^0-9.]/g, '')) || 0;
-    const computedRoyalty = posSales * (partnerContractRate / 100);
-    const recordId = `${declareMonth}_${user.role}`;
+    const grossSalesVal = parseFloat(grossSalesLocal) || 0;
+    const netSalesVal = parseFloat(netSalesLocal) || 0;
+    const royaltyRateVal = partnerContractRate;
+    
+    // 로열티 청구액(현지통화) = Net Sales * 청구율
+    const royaltyAmountLocalVal = netSalesVal * (royaltyRateVal / 100);
+    
+    // 로열티 청구액(USD)
+    const royaltyAmountUsdVal = parseFloat(royaltyAmountUsd) || 0;
+    
+    // 원천징수액(현지통화) = 로열티 청구액(현지통화) * 원천징수율
+    const withholdingTaxLocalVal = royaltyAmountLocalVal * (manualWithholdingTaxRate / 100);
+    
+    // 로열티 실입금액(현지통화) = 청구액(현지통화) - 원천징수액(현지통화)
+    const netRoyaltyLocalVal = royaltyAmountLocalVal - withholdingTaxLocalVal;
+
+    // 문서 Key: 정산월_파트너ID_매장명(있을경우)
+    const storeSuffix = selectedStore ? `_${selectedStore.replace(/\s+/g, "")}` : "";
+    const recordId = `${declareMonth}_${user.role}${storeSuffix}`;
 
     setUploading(true);
 
@@ -212,10 +279,25 @@ export default function RoyaltyPage() {
         partnerName: user.name || user.role,
         partnerCode: user.role === "Vietnam" ? "VNM" : user.role === "Japan" ? "JPN" : "MF",
         month: declareMonth,
-        posSales: posSales,
-        royaltyRate: partnerContractRate,
-        royaltyAmount: computedRoyalty,
-        evidenceUrl: evidenceUrl,
+        billingMonth: billingMonth,
+        country: selectedCountry,
+        storeName: selectedStore,
+        grossSalesLocal: grossSalesVal,
+        netSalesLocal: netSalesVal,
+        royaltyRate: royaltyRateVal,
+        royaltyAmountLocal: royaltyAmountLocalVal,
+        royaltyAmount: royaltyAmountUsdVal, // 로열티 청구액 USD
+        withholdingTaxRate: manualWithholdingTaxRate,
+        withholdingTaxLocal: withholdingTaxLocalVal,
+        netRoyaltyLocal: netRoyaltyLocalVal,
+        
+        // 4종 증빙 서류 Url
+        invoiceUrl: "",
+        remittanceUrl: "",
+        salesEvidenceUrl: evidenceUrl, // 자가신고 시 업로드한 파일을 매출증빙으로 등록
+        withholdingTaxUrl: "",
+        evidenceUrl: evidenceUrl, // 호환성용
+        
         status: "DECLARED",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
@@ -232,6 +314,10 @@ export default function RoyaltyPage() {
       setIsDeclareOpen(false);
       setDeclareMonth("");
       setDeclareSales("");
+      setBillingMonth("");
+      setGrossSalesLocal("");
+      setNetSalesLocal("");
+      setRoyaltyAmountUsd("");
       setEvidenceFile(null);
       alert("매출 신고가 성공적으로 완료되었습니다. 본사 승인을 기다려주세요.");
     } catch (err) {
@@ -241,67 +327,112 @@ export default function RoyaltyPage() {
     }
   };
 
-  // Partner or HQ standalone evidence document upload/update handler
-  const handleEvidenceOnlyUpload = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedRoyaltyForUpload || !evidenceUploadFile) {
-      alert("파일을 선택해 주세요.");
-      return;
-    }
-
-    setUploadingEvidence(true);
-
+  // Unified document upload handler
+  const handleDocumentUpload = async (file: File, type: 'invoice' | 'evidence' | 'remittance' | 'withholding') => {
+    if (!selectedRoyaltyForDocs) return;
+    
+    setUploadingDocType(type);
     try {
-      let evidenceUrl = "";
-      if (systemConfig?.gasUrl) {
-        const base64Data = await fileToBase64(evidenceUploadFile);
-        const response = await fetch(systemConfig.gasUrl, {
-          method: "POST",
-          mode: "cors",
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded"
-          },
-          body: new URLSearchParams({
-            filename: `RoyaltyEvidence_${selectedRoyaltyForUpload.month}_${selectedRoyaltyForUpload.partnerId}_${evidenceUploadFile.name}`,
-            mimeType: evidenceUploadFile.type,
-            fileData: base64Data,
-            folderId: systemConfig.driveFolderId || ""
-          })
-        });
-        const resJson = await response.json();
-        if (resJson && resJson.status === "success") {
-          evidenceUrl = resJson.url;
-        } else {
-          console.warn("GAS upload succeeded but didn't return success code:", resJson);
-          if (resJson.url) evidenceUrl = resJson.url;
-        }
+      let fileUrl = "";
+      const base64Data = await fileToBase64(file);
+      
+      const gasUrl = systemConfig?.gasUrl || "https://script.google.com/macros/s/AKfycbxOszg6c1l6uNspv4NlR1wN_J1L6L26g2L87y_1x19w84-3y10P/exec";
+      const folderId = systemConfig?.driveFolderId || "";
+      
+      const response = await fetch(gasUrl, {
+        method: "POST",
+        mode: "cors",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded"
+        },
+        body: new URLSearchParams({
+          filename: `RoyaltyDoc_${type}_${selectedRoyaltyForDocs.month}_${selectedRoyaltyForDocs.partnerId}_${file.name}`,
+          mimeType: file.type,
+          fileData: base64Data,
+          folderId: folderId
+        })
+      });
+      
+      const resJson = await response.json();
+      if (resJson && resJson.status === "success") {
+        fileUrl = resJson.url;
+      } else if (resJson && resJson.url) {
+        fileUrl = resJson.url;
+      }
+      
+      if (!fileUrl) {
+        throw new Error("파일 업로드에 실패했습니다. API 응답을 확인하세요.");
       }
 
-      if (!evidenceUrl) {
-        throw new Error("파일 업로드에 실패했습니다. API 설정을 확인하세요.");
-      }
-
-      await updateDoc(doc(db, "royalties", selectedRoyaltyForUpload.id), {
-        evidenceUrl: evidenceUrl,
+      // Update in Firestore
+      const updateData: any = {
         updatedAt: new Date().toISOString()
-      });
-
-      // Notification
-      await addDoc(collection(db, "notifications"), {
-        type: "ROYALTY",
-        message: `[${selectedRoyaltyForUpload.partnerName}] 파트너사가 ${selectedRoyaltyForUpload.month}월 로열티 매출 증빙 자료를 업로드/변경 하였습니다.`,
-        isRead: false,
-        createdAt: new Date().toISOString()
-      });
-
-      setIsUploadEvidenceOpen(false);
-      setEvidenceUploadFile(null);
-      setSelectedRoyaltyForUpload(null);
-      alert("매출 증빙 서류가 성공적으로 업로드 및 등록되었습니다.");
+      };
+      
+      if (type === 'invoice') {
+        updateData.invoiceUrl = fileUrl;
+      } else if (type === 'evidence') {
+        updateData.salesEvidenceUrl = fileUrl;
+        updateData.evidenceUrl = fileUrl; // 호환성 유지
+      } else if (type === 'remittance') {
+        updateData.remittanceUrl = fileUrl;
+        updateData.receiptUrl = fileUrl; // 호환성 유지
+      } else if (type === 'withholding') {
+        updateData.withholdingTaxUrl = fileUrl;
+      }
+      
+      await updateDoc(doc(db, "royalties", selectedRoyaltyForDocs.id), updateData);
+      
+      // Update local state to reflect UI instantly
+      setSelectedRoyaltyForDocs((prev: any) => ({
+        ...prev,
+        ...updateData
+      }));
+      
+      alert("문서가 성공적으로 업로드되었습니다.");
     } catch (err) {
-      alert("증빙 등록 중 에러 발생: " + err);
+      alert("문서 업로드 에러: " + err);
     } finally {
-      setUploadingEvidence(false);
+      setUploadingDocType(null);
+    }
+  };
+
+  // Unified document delete handler
+  const handleDocumentDelete = async (type: 'invoice' | 'evidence' | 'remittance' | 'withholding') => {
+    if (!selectedRoyaltyForDocs) return;
+    if (!confirm("정말로 이 증빙 서류를 삭제하시겠습니까?")) return;
+    
+    setUploadingDocType(type);
+    try {
+      const updateData: any = {
+        updatedAt: new Date().toISOString()
+      };
+      
+      if (type === 'invoice') {
+        updateData.invoiceUrl = "";
+      } else if (type === 'evidence') {
+        updateData.salesEvidenceUrl = "";
+        updateData.evidenceUrl = "";
+      } else if (type === 'remittance') {
+        updateData.remittanceUrl = "";
+        updateData.receiptUrl = "";
+      } else if (type === 'withholding') {
+        updateData.withholdingTaxUrl = "";
+      }
+      
+      await updateDoc(doc(db, "royalties", selectedRoyaltyForDocs.id), updateData);
+      
+      // Update local state
+      setSelectedRoyaltyForDocs((prev: any) => ({
+        ...prev,
+        ...updateData
+      }));
+      
+      alert("문서가 성공적으로 삭제되었습니다.");
+    } catch (err) {
+      alert("문서 삭제 에러: " + err);
+    } finally {
+      setUploadingDocType(null);
     }
   };
 
@@ -513,18 +644,33 @@ export default function RoyaltyPage() {
   // HQ manual entry insert handler
   const handleHQAddManual = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedPartnerId || !manualMonth || !manualSales) {
-      alert("모든 필드를 입력해주세요.");
+    if (!selectedPartnerId || !manualMonth || !billingMonth || !netSalesLocal) {
+      alert("정산월, 청구월, Net Sales 및 파트너사는 필수 기입사항입니다.");
       return;
     }
 
     const partner = partners.find(p => p.id === selectedPartnerId);
     if (!partner) return;
 
-    const posSales = parseFloat(manualSales.replace(/[^0-9.]/g, '')) || 0;
-    const royaltyRate = parseFloat(manualRate) || 3.5;
-    const royaltyAmount = posSales * (royaltyRate / 100);
-    const recordId = `${manualMonth}_${selectedPartnerId}`;
+    const grossSalesVal = parseFloat(grossSalesLocal) || 0;
+    const netSalesVal = parseFloat(netSalesLocal) || 0;
+    const royaltyRateVal = parseFloat(manualRate) || 3.5;
+    
+    // 로열티 청구액(현지통화) = Net Sales * 청구율
+    const royaltyAmountLocalVal = netSalesVal * (royaltyRateVal / 100);
+    
+    // 로열티 청구액(USD)
+    const royaltyAmountUsdVal = parseFloat(royaltyAmountUsd) || 0;
+    
+    // 원천징수액(현지통화) = 로열티 청구액(현지통화) * 원천징수율
+    const withholdingTaxLocalVal = royaltyAmountLocalVal * (manualWithholdingTaxRate / 100);
+    
+    // 로열티 실입금액(현지통화) = 청구액(현지통화) - 원천징수액(현지통화)
+    const netRoyaltyLocalVal = royaltyAmountLocalVal - withholdingTaxLocalVal;
+
+    // 문서 Key: 정산월_파트너ID_매장명(있을경우)
+    const storeSuffix = selectedStore ? `_${selectedStore.replace(/\s+/g, "")}` : "";
+    const recordId = `${manualMonth}_${selectedPartnerId}${storeSuffix}`;
 
     try {
       await setDoc(doc(db, "royalties", recordId), {
@@ -532,10 +678,25 @@ export default function RoyaltyPage() {
         partnerName: partner.name,
         partnerCode: partner.country || "MF",
         month: manualMonth,
-        posSales: posSales,
-        royaltyRate: royaltyRate,
-        royaltyAmount: royaltyAmount,
-        evidenceUrl: "",
+        billingMonth: billingMonth,
+        country: selectedCountry,
+        storeName: selectedStore,
+        grossSalesLocal: grossSalesVal,
+        netSalesLocal: netSalesVal,
+        royaltyRate: royaltyRateVal,
+        royaltyAmountLocal: royaltyAmountLocalVal,
+        royaltyAmount: royaltyAmountUsdVal, // 기존의 달러 로열티 청구액은 합계 등을 위해 유지
+        withholdingTaxRate: manualWithholdingTaxRate,
+        withholdingTaxLocal: withholdingTaxLocalVal,
+        netRoyaltyLocal: netRoyaltyLocalVal,
+        
+        // 4종 증빙 서류 Url
+        invoiceUrl: "",
+        remittanceUrl: "",
+        salesEvidenceUrl: "",
+        withholdingTaxUrl: "",
+        evidenceUrl: "", // 기존 소스 호환용
+        
         status: "INVOICED", // HQ manual claims start as INVOICED directly
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
@@ -544,8 +705,12 @@ export default function RoyaltyPage() {
       setIsHQAddOpen(false);
       setSelectedPartnerId("");
       setManualMonth("");
-      setManualSales("");
-      setManualRate("3.5");
+      setBillingMonth("");
+      setGrossSalesLocal("");
+      setNetSalesLocal("");
+      setRoyaltyAmountUsd("");
+      setSelectedStore("");
+      setPartnerStores([]);
       alert("대리 로열티 정산서가 정상적으로 등록 및 발행되었습니다.");
     } catch (err) {
       alert("수동 등록 에러: " + err);
@@ -700,14 +865,15 @@ export default function RoyaltyPage() {
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-50/50">
-              <TableHead className="w-[100px]">{lang === "KO" ? "정산월" : "Month"}</TableHead>
-              {user?.role === "HQ" && <TableHead>{lang === "KO" ? "파트너사" : "Partner"}</TableHead>}
-              <TableHead className="text-right">{lang === "KO" ? "POS 매출 실적" : "POS Sales (USD)"}</TableHead>
-              <TableHead className="text-center">{lang === "KO" ? "요율" : "Rate"}</TableHead>
-              <TableHead className="text-right font-extrabold text-blue-600">{lang === "KO" ? "로열티 청구액" : "Royalty Due"}</TableHead>
-              <TableHead className="text-center">{lang === "KO" ? "1. 매출 증빙" : "1. Sales Doc"}</TableHead>
-              <TableHead className="text-center">{lang === "KO" ? "2. 송금 증빙" : "2. Bank Slip"}</TableHead>
-              <TableHead className="text-center">{lang === "KO" ? "3. 수납 증빙" : "3. HQ Voucher"}</TableHead>
+              <TableHead className="w-[80px]">{lang === "KO" ? "정산/청구월" : "Month"}</TableHead>
+              <TableHead>{lang === "KO" ? "파트너사 / 매장 (국가)" : "Partner / Store (Country)"}</TableHead>
+              <TableHead className="text-right">{lang === "KO" ? "Gross 매출 (현지)" : "Gross Sales (Local)"}</TableHead>
+              <TableHead className="text-right font-semibold">{lang === "KO" ? "Net 매출 (현지)" : "Net Sales (Local)"}</TableHead>
+              <TableHead className="text-center text-xs">{lang === "KO" ? "요율/원천징수" : "Rate/WHT"}</TableHead>
+              <TableHead className="text-right font-extrabold text-blue-600">{lang === "KO" ? "청구액 (현지)" : "Royalty (Local)"}</TableHead>
+              <TableHead className="text-right font-extrabold text-indigo-600">{lang === "KO" ? "청구액 (USD)" : "Royalty (USD)"}</TableHead>
+              <TableHead className="text-right font-bold text-emerald-600">{lang === "KO" ? "실입금액 (현지)" : "Net Royalty (Local)"}</TableHead>
+              <TableHead className="text-center">{lang === "KO" ? "증빙 서류" : "Documents"}</TableHead>
               <TableHead className="text-center">{lang === "KO" ? "정산 상태" : "Status"}</TableHead>
               <TableHead className="text-right">{lang === "KO" ? "정산 관리" : "Management"}</TableHead>
             </TableRow>
@@ -715,160 +881,68 @@ export default function RoyaltyPage() {
           <TableBody>
             {renderedLedger.map((row, i) => (
               <TableRow key={i} className="hover:bg-muted/10 transition-colors">
-                <TableCell className="font-mono text-xs font-bold">{row.month}</TableCell>
-                {user?.role === "HQ" && (
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-slate-800 text-xs">{row.partnerName}</span>
-                      <Badge variant="outline" className="text-[9px] uppercase font-mono px-1.5 py-0">{row.partnerCode}</Badge>
-                    </div>
-                  </TableCell>
-                )}
-                <TableCell className="text-right font-mono text-xs font-medium">${Math.round(row.posSales).toLocaleString()}</TableCell>
-                <TableCell className="text-center font-mono text-xs text-slate-500">{row.royaltyRate}%</TableCell>
-                <TableCell className="text-right font-mono text-xs font-extrabold text-blue-600">${Math.round(row.royaltyAmount).toLocaleString()}</TableCell>
+                <TableCell className="font-mono text-xs">
+                  <div className="font-bold text-slate-800">{row.month}</div>
+                  <div className="text-[10px] text-slate-400 font-medium">{row.billingMonth || "-"}</div>
+                </TableCell>
+                <TableCell>
+                  <div className="flex flex-col">
+                    <span className="font-bold text-slate-800 text-xs">{row.partnerName}</span>
+                    <span className="text-[10px] text-slate-500 font-semibold">{row.storeName || "-"} {row.country ? `(${row.country})` : ""}</span>
+                  </div>
+                </TableCell>
+                <TableCell className="text-right font-mono text-xs text-slate-600">
+                  {row.grossSalesLocal ? row.grossSalesLocal.toLocaleString() : "-"}
+                </TableCell>
+                <TableCell className="text-right font-mono text-xs font-semibold text-slate-800">
+                  {row.netSalesLocal ? row.netSalesLocal.toLocaleString() : "-"}
+                </TableCell>
+                <TableCell className="text-center font-mono text-[11px] text-slate-500">
+                  <div>R: {row.royaltyRate}%</div>
+                  <div className="text-slate-400">W: {row.withholdingTaxRate || 0}%</div>
+                </TableCell>
+                <TableCell className="text-right font-mono text-xs font-extrabold text-blue-600">
+                  {row.royaltyAmountLocal ? Math.round(row.royaltyAmountLocal).toLocaleString() : "-"}
+                </TableCell>
+                <TableCell className="text-right font-mono text-xs font-extrabold text-indigo-600">
+                  ${row.royaltyAmount ? Math.round(row.royaltyAmount).toLocaleString() : "0"}
+                </TableCell>
+                <TableCell className="text-right font-mono text-xs font-bold text-emerald-600">
+                  {row.netRoyaltyLocal ? Math.round(row.netRoyaltyLocal).toLocaleString() : "-"}
+                </TableCell>
                 
-                {/* 1. 매출 증빙 (POS Report) */}
+                {/* 4대 증빙 서류 아이콘 & 모달 연결 */}
                 <TableCell className="text-center">
-                  <div className="flex flex-col items-center gap-1 justify-center">
-                    {row.evidenceUrl ? (
-                      <div className="flex items-center gap-2">
-                        <a 
-                          href={row.evidenceUrl} 
-                          target="_blank" 
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-1 text-[11px] font-bold text-blue-600 hover:underline"
-                        >
-                          <FileText className="w-3.5 h-3.5" />
-                          {lang === "KO" ? "보기" : "View"}
-                        </a>
-                        {row.status === "DECLARED" && user?.role !== "HQ" && (
-                          <button 
-                            onClick={() => {
-                              setSelectedRoyaltyForUpload(row);
-                              setIsUploadEvidenceOpen(true);
-                            }}
-                            className="text-[10px] font-bold text-slate-400 hover:text-blue-600 transition-colors hover:underline"
-                            title={lang === "KO" ? "증빙 서류 변경" : "Change Document"}
-                          >
-                            {lang === "KO" ? "변경" : "Edit"}
-                          </button>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="flex flex-col items-center gap-1">
-                        <span className="text-[10px] text-muted-foreground italic">{lang === "KO" ? "증빙 없음" : "No file"}</span>
-                        {row.status === "DECLARED" && user?.role !== "HQ" && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => {
-                              setSelectedRoyaltyForUpload(row);
-                              setIsUploadEvidenceOpen(true);
-                            }}
-                            className="h-6 px-1.5 text-[9px] font-extrabold text-blue-600 hover:text-blue-700 bg-blue-50/50 hover:bg-blue-50 border border-blue-100"
-                          >
-                            {lang === "KO" ? "파일 첨부" : "Attach File"}
-                          </Button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </TableCell>
-
-                {/* 2. 송금 증빙 (Bank Wire Slip) */}
-                <TableCell className="text-center">
-                  <div className="flex flex-col items-center gap-1 justify-center">
-                    {row.receiptUrl ? (
-                      <div className="flex items-center gap-2">
-                        <a 
-                          href={row.receiptUrl} 
-                          target="_blank" 
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 hover:underline"
-                        >
-                          <FileText className="w-3.5 h-3.5 text-emerald-500" />
-                          {lang === "KO" ? "보기" : "View"}
-                        </a>
-                        {row.status === "PAID_SUBMITTED" && user?.role !== "HQ" && (
-                          <button 
-                            onClick={() => {
-                              setSelectedRoyaltyForReceipt(row);
-                              setIsReceiptUploadOpen(true);
-                            }}
-                            className="text-[10px] font-bold text-slate-400 hover:text-emerald-600 transition-colors hover:underline"
-                            title={lang === "KO" ? "송금 증빙 변경" : "Change Bank Slip"}
-                          >
-                            {lang === "KO" ? "변경" : "Edit"}
-                          </button>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="flex flex-col items-center gap-1">
-                        <span className="text-[10px] text-muted-foreground italic">{lang === "KO" ? "미제출" : "No Slip"}</span>
-                        {row.status === "INVOICED" && user?.role !== "HQ" && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => {
-                              setSelectedRoyaltyForReceipt(row);
-                              setIsReceiptUploadOpen(true);
-                            }}
-                            className="h-6 px-1.5 text-[9px] font-extrabold text-emerald-600 hover:text-emerald-700 bg-emerald-50/50 hover:bg-emerald-50 border border-emerald-100"
-                          >
-                            {lang === "KO" ? "송금 등록" : "Upload Slip"}
-                          </Button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </TableCell>
-
-                {/* 3. 수납 증빙 (HQ Deposit Voucher) */}
-                <TableCell className="text-center">
-                  <div className="flex flex-col items-center gap-1 justify-center">
-                    {row.depositVoucherUrl ? (
-                      <div className="flex items-center gap-2">
-                        <a 
-                          href={row.depositVoucherUrl} 
-                          target="_blank" 
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-600 hover:underline"
-                        >
-                          <FileText className="w-3.5 h-3.5 text-amber-500" />
-                          {lang === "KO" ? "보기" : "View"}
-                        </a>
-                        {row.status === "CLEARED" && user?.role === "HQ" && (
-                          <button 
-                            onClick={() => {
-                              setSelectedRoyaltyForVoucher(row);
-                              setIsVoucherUploadOpen(true);
-                            }}
-                            className="text-[10px] font-bold text-slate-400 hover:text-amber-600 transition-colors hover:underline"
-                            title={lang === "KO" ? "수납 증빙 변경" : "Change Voucher"}
-                          >
-                            {lang === "KO" ? "변경" : "Edit"}
-                          </button>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="flex flex-col items-center gap-1">
-                        <span className="text-[10px] text-muted-foreground italic">{lang === "KO" ? "미확인" : "Unverified"}</span>
-                        {row.status === "PAID_SUBMITTED" && user?.role === "HQ" && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => {
-                              setSelectedRoyaltyForVoucher(row);
-                              setIsVoucherUploadOpen(true);
-                            }}
-                            className="h-6 px-1.5 text-[9px] font-extrabold text-amber-600 hover:text-amber-700 bg-amber-50/50 hover:bg-amber-50 border border-amber-100"
-                          >
-                            {lang === "KO" ? "수납 등록" : "Confirm Voucher"}
-                          </Button>
-                        )}
-                      </div>
-                    )}
+                  <div className="flex flex-col items-center gap-1">
+                    <div className="flex items-center gap-1 justify-center">
+                      <span 
+                        className={`w-2.5 h-2.5 rounded-full ${row.invoiceUrl ? 'bg-emerald-500' : 'bg-slate-300'}`} 
+                        title={lang === "KO" ? (row.invoiceUrl ? "인보이스 등록됨" : "인보이스 미등록") : (row.invoiceUrl ? "Invoice Uploaded" : "No Invoice")}
+                      />
+                      <span 
+                        className={`w-2.5 h-2.5 rounded-full ${(row.salesEvidenceUrl || row.evidenceUrl) ? 'bg-blue-500' : 'bg-slate-300'}`} 
+                        title={lang === "KO" ? ((row.salesEvidenceUrl || row.evidenceUrl) ? "매출증빙 등록됨" : "매출증빙 미등록") : ((row.salesEvidenceUrl || row.evidenceUrl) ? "Sales Evidence Uploaded" : "No Sales Evidence")}
+                      />
+                      <span 
+                        className={`w-2.5 h-2.5 rounded-full ${(row.remittanceUrl || row.receiptUrl) ? 'bg-amber-500' : 'bg-slate-300'}`} 
+                        title={lang === "KO" ? ((row.remittanceUrl || row.receiptUrl) ? "송금증 등록됨" : "송금증 미등록") : ((row.remittanceUrl || row.receiptUrl) ? "Remittance Uploaded" : "No Remittance")}
+                      />
+                      <span 
+                        className={`w-2.5 h-2.5 rounded-full ${row.withholdingTaxUrl ? 'bg-purple-500' : 'bg-slate-300'}`} 
+                        title={lang === "KO" ? (row.withholdingTaxUrl ? "원천징수증 등록됨" : "원천징수증 미등록") : (row.withholdingTaxUrl ? "WHT Receipt Uploaded" : "No WHT Receipt")}
+                      />
+                    </div>
+                    <Button 
+                      size="sm" 
+                      variant="ghost" 
+                      onClick={() => {
+                        setSelectedRoyaltyForDocs(row);
+                        setIsDocumentCenterOpen(true);
+                      }}
+                      className="h-6 px-1.5 text-[10px] font-bold text-slate-600 hover:text-blue-600 bg-slate-50 hover:bg-blue-50/50 border border-slate-200"
+                    >
+                      {lang === "KO" ? "증빙 관리" : "Docs"}
+                    </Button>
                   </div>
                 </TableCell>
 
@@ -972,8 +1046,8 @@ export default function RoyaltyPage() {
                             size="sm" 
                             variant="outline"
                             onClick={() => {
-                              setSelectedRoyaltyForReceipt(row);
-                              setIsReceiptUploadOpen(true);
+                              setSelectedRoyaltyForDocs(row);
+                              setIsDocumentCenterOpen(true);
                             }}
                             className="h-7 text-[10px] font-bold bg-emerald-50 text-emerald-600 hover:bg-emerald-100 border-emerald-200 gap-1"
                           >
@@ -1004,7 +1078,7 @@ export default function RoyaltyPage() {
             ))}
             {renderedLedger.length === 0 && (
               <TableRow>
-                <TableCell colSpan={user?.role === "HQ" ? 8 : 7} className="h-24 text-center text-muted-foreground">
+                <TableCell colSpan={11} className="h-24 text-center text-muted-foreground">
                   {lang === "KO" ? "로열티 정산 내역이 없습니다." : "No royalty records."}
                 </TableCell>
               </TableRow>
@@ -1015,7 +1089,7 @@ export default function RoyaltyPage() {
 
       {/* Partner Declaration Dialog Modal */}
       <Dialog open={isDeclareOpen} onOpenChange={setIsDeclareOpen}>
-        <DialogContent className="sm:max-w-[420px]">
+        <DialogContent className="sm:max-w-[500px]">
           <form onSubmit={handlePartnerDeclare}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 font-bold text-lg text-primary">
@@ -1024,11 +1098,11 @@ export default function RoyaltyPage() {
               </DialogTitle>
               <DialogDescription>
                 {lang === "KO" 
-                  ? "해당 정산 월의 전체 POS 매출 총액을 신고하고 본사 검증을 위해 매출 증명 파일(PDF, 이미지)을 첨부하여 주십시오."
-                  : "Submit monthly POS gross sales. Contract rates will apply, and please attach performance reports."}
+                  ? "현지 매장의 상세 매출 및 정산 정보를 기입하고 본사 승인을 요청합니다."
+                  : "Submit monthly sales figures and details for contract calculation."}
               </DialogDescription>
             </DialogHeader>
-            <div className="grid gap-4 py-4">
+            <div className="grid gap-4 py-4 max-h-[70vh] overflow-y-auto px-1">
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
                   <Label htmlFor="declare-month">{lang === "KO" ? "정산 대상 월" : "Target Month"}</Label>
@@ -1042,29 +1116,120 @@ export default function RoyaltyPage() {
                   />
                 </div>
                 <div className="grid gap-2">
-                  <Label htmlFor="declare-rate">{lang === "KO" ? "적용 요율" : "Contract Rate"}</Label>
+                  <Label htmlFor="declare-billing-month">{lang === "KO" ? "청구 월" : "Billing Month"}</Label>
                   <Input 
-                    id="declare-rate"
-                    type="text"
-                    value={`${partnerContractRate}%`}
-                    disabled
-                    className="bg-slate-50 font-bold font-mono text-xs"
+                    id="declare-billing-month"
+                    type="month"
+                    value={billingMonth}
+                    onChange={(e) => setBillingMonth(e.target.value)}
+                    required
                   />
                 </div>
               </div>
 
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label>{lang === "KO" ? "국가명" : "Country"}</Label>
+                  <Input 
+                    value={selectedCountry || ""} 
+                    disabled 
+                    className="bg-slate-50 font-bold"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="declare-store">{lang === "KO" ? "매장명" : "Store Name"}</Label>
+                  <select
+                    id="declare-store"
+                    value={selectedStore}
+                    onChange={(e) => setSelectedStore(e.target.value)}
+                    required
+                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 font-medium"
+                  >
+                    <option value="">{lang === "KO" ? "매장 선택" : "Select Store"}</option>
+                    {partnerStores.map(store => (
+                      <option key={store} value={store} className="text-slate-900">{store}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="declare-gross-sales">{lang === "KO" ? "Gross Sales (현지통화)" : "Gross Sales (Local)"}</Label>
+                  <Input 
+                    id="declare-gross-sales"
+                    type="number"
+                    placeholder="0"
+                    value={grossSalesLocal}
+                    onChange={(e) => setGrossSalesLocal(e.target.value)}
+                    required
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="declare-net-sales">{lang === "KO" ? "Net Sales (현지통화)" : "Net Sales (Local)"}</Label>
+                  <Input 
+                    id="declare-net-sales"
+                    type="number"
+                    placeholder="0"
+                    value={netSalesLocal}
+                    onChange={(e) => setNetSalesLocal(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3 bg-slate-50 p-3 rounded-lg text-xs border">
+                <div>
+                  <div className="text-slate-500 font-bold">{lang === "KO" ? "청구율" : "Royalty Rate"}</div>
+                  <div className="font-mono text-sm font-black text-slate-800">{partnerContractRate}%</div>
+                </div>
+                <div>
+                  <div className="text-slate-500 font-bold">{lang === "KO" ? "원천징수율" : "WHT Rate"}</div>
+                  <div className="font-mono text-sm font-black text-slate-800">{manualWithholdingTaxRate}%</div>
+                </div>
+                <div>
+                  <div className="text-slate-500 font-bold">{lang === "KO" ? "국가" : "Country"}</div>
+                  <div className="font-sans text-sm font-bold text-slate-800">{selectedCountry || "-"}</div>
+                </div>
+              </div>
+
+              {/* 실시간 계산 패널 */}
+              {netSalesLocal && (
+                <div className="bg-blue-50 border border-blue-200 p-3 rounded-lg text-xs space-y-1">
+                  <div className="flex justify-between font-bold text-slate-600">
+                    <span>{lang === "KO" ? "로열티 청구액 (현지통화)" : "Royalty Local"}</span>
+                    <span className="font-mono text-blue-600">
+                      {((parseFloat(netSalesLocal) || 0) * (partnerContractRate / 100)).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <div className="flex justify-between font-bold text-slate-600">
+                    <span>{lang === "KO" ? "원천징수액 (현지통화)" : "WHT Local"}</span>
+                    <span className="font-mono text-amber-600">
+                      {(((parseFloat(netSalesLocal) || 0) * (partnerContractRate / 100)) * (manualWithholdingTaxRate / 100)).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <div className="h-px bg-slate-200 my-1" />
+                  <div className="flex justify-between font-extrabold text-slate-900">
+                    <span>{lang === "KO" ? "실 입금액 (현지통화)" : "Net Royalty Local"}</span>
+                    <span className="font-mono text-emerald-600">
+                      {(((parseFloat(netSalesLocal) || 0) * (partnerContractRate / 100)) * (1 - manualWithholdingTaxRate / 100)).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </div>
+              )}
+
               <div className="grid gap-2">
-                <Label htmlFor="declare-sales">{lang === "KO" ? "POS 총 매출액 (USD)" : "POS Gross Sales (USD)"}</Label>
+                <Label htmlFor="declare-sales-usd">{lang === "KO" ? "로열티 청구액 (USD 수기입력)" : "Royalty Due (USD Manual)"}</Label>
                 <Input 
-                  id="declare-sales"
+                  id="declare-sales-usd"
                   placeholder="0.00"
-                  value={declareSales}
-                  onChange={(e) => setDeclareSales(e.target.value)}
+                  value={royaltyAmountUsd}
+                  onChange={(e) => setRoyaltyAmountUsd(e.target.value)}
                   required
                 />
               </div>
 
-              <div className="grid gap-2 mt-4">
+              <div className="grid gap-2">
                 <Label>{lang === "KO" ? "매출 실적 증명 자료" : "Sales Evidence Report"}</Label>
                 <DropzoneUploader 
                   onFileSelect={setEvidenceFile} 
@@ -1072,13 +1237,6 @@ export default function RoyaltyPage() {
                   label={lang === "KO" ? "클릭하거나 파일을 드래그하여 업로드" : "Drag & drop or click to upload"}
                 />
               </div>
-
-              {declareSales && (
-                <div className="bg-blue-50 border border-blue-200 p-3 rounded-lg text-xs font-bold text-blue-600 mt-2">
-                  {lang === "KO" ? "예상 청구 로열티 금액" : "Estimated Royalty Due"}: 
-                  <span className="font-mono ml-1 text-sm">${(parseFloat(declareSales.replace(/[^0-9.]/g, '')) * (partnerContractRate / 100) || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })} USD</span>
-                </div>
-              )}
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setIsDeclareOpen(false)}>
@@ -1099,7 +1257,7 @@ export default function RoyaltyPage() {
 
       {/* HQ Manual Add Dialog Modal */}
       <Dialog open={isHQAddOpen} onOpenChange={setIsHQAddOpen}>
-        <DialogContent className="sm:max-w-[450px]">
+        <DialogContent className="sm:max-w-[500px]">
           <form onSubmit={handleHQAddManual}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 text-primary font-bold text-lg">
@@ -1112,7 +1270,7 @@ export default function RoyaltyPage() {
                   : "Issue a royalty invoice manually on behalf of partners based on confirmed accounts."}
               </DialogDescription>
             </DialogHeader>
-            <div className="grid gap-4 py-4">
+            <div className="grid gap-4 py-4 max-h-[70vh] overflow-y-auto px-1">
               <div className="grid gap-2">
                 <Label htmlFor="manual-partner">{lang === "KO" ? "대상 파트너사" : "Target Partner"}</Label>
                 <select 
@@ -1142,6 +1300,79 @@ export default function RoyaltyPage() {
                   />
                 </div>
                 <div className="grid gap-2">
+                  <Label htmlFor="manual-billing-month">{lang === "KO" ? "청구 월" : "Billing Month"}</Label>
+                  <Input 
+                    id="manual-billing-month"
+                    type="month"
+                    value={billingMonth}
+                    onChange={(e) => setBillingMonth(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="manual-country">{lang === "KO" ? "국가명" : "Country"}</Label>
+                  <select
+                    id="manual-country"
+                    value={selectedCountry}
+                    onChange={(e) => setSelectedCountry(e.target.value)}
+                    required
+                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring font-medium"
+                  >
+                    <option value="">{lang === "KO" ? "국가 선택" : "Select Country"}</option>
+                    <option value="대만">대만 (Taiwan)</option>
+                    <option value="필리핀">필리핀 (Philippines)</option>
+                    <option value="싱가포르">싱가포르 (Singapore)</option>
+                    <option value="말레이시아">말레이시아 (Malaysia)</option>
+                    <option value="홍콩">홍콩 (Hong Kong)</option>
+                  </select>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="manual-store">{lang === "KO" ? "매장명" : "Store Name"}</Label>
+                  <select
+                    id="manual-store"
+                    value={selectedStore}
+                    onChange={(e) => setSelectedStore(e.target.value)}
+                    required
+                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring font-medium"
+                  >
+                    <option value="">{lang === "KO" ? "매장 선택" : "Select Store"}</option>
+                    {partnerStores.map(store => (
+                      <option key={store} value={store} className="text-slate-900">{store}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="manual-gross-sales">{lang === "KO" ? "Gross Sales (현지통화)" : "Gross Sales (Local)"}</Label>
+                  <Input 
+                    id="manual-gross-sales"
+                    type="number"
+                    placeholder="0"
+                    value={grossSalesLocal}
+                    onChange={(e) => setGrossSalesLocal(e.target.value)}
+                    required
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="manual-net-sales">{lang === "KO" ? "Net Sales (현지통화)" : "Net Sales (Local)"}</Label>
+                  <Input 
+                    id="manual-net-sales"
+                    type="number"
+                    placeholder="0"
+                    value={netSalesLocal}
+                    onChange={(e) => setNetSalesLocal(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
                   <Label htmlFor="manual-rate">{lang === "KO" ? "청구 요율 (%)" : "Royalty Rate (%)"}</Label>
                   <Input 
                     id="manual-rate"
@@ -1152,25 +1383,54 @@ export default function RoyaltyPage() {
                     required
                   />
                 </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="manual-tax-rate">{lang === "KO" ? "원천징수 요율 (%)" : "Withholding Tax Rate (%)"}</Label>
+                  <Input 
+                    id="manual-tax-rate"
+                    type="number"
+                    step="0.1"
+                    value={manualWithholdingTaxRate}
+                    onChange={(e) => setManualWithholdingTaxRate(parseFloat(e.target.value) || 0)}
+                    required
+                  />
+                </div>
               </div>
 
+              {/* 실시간 계산 패널 */}
+              {netSalesLocal && (
+                <div className="bg-slate-50 border p-3 rounded-lg text-xs space-y-1">
+                  <div className="flex justify-between font-bold text-slate-600">
+                    <span>{lang === "KO" ? "로열티 청구액 (현지통화)" : "Royalty Local"}</span>
+                    <span className="font-mono text-blue-600">
+                      {((parseFloat(netSalesLocal) || 0) * (parseFloat(manualRate) || 0) / 100).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <div className="flex justify-between font-bold text-slate-600">
+                    <span>{lang === "KO" ? "원천징수액 (현지통화)" : "WHT Local"}</span>
+                    <span className="font-mono text-amber-600">
+                      {(((parseFloat(netSalesLocal) || 0) * (parseFloat(manualRate) || 0) / 100) * (manualWithholdingTaxRate / 100)).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <div className="h-px bg-slate-200 my-1" />
+                  <div className="flex justify-between font-extrabold text-slate-900">
+                    <span>{lang === "KO" ? "실 입금액 (현지통화)" : "Net Royalty Local"}</span>
+                    <span className="font-mono text-emerald-600">
+                      {(((parseFloat(netSalesLocal) || 0) * (parseFloat(manualRate) || 0) / 100) * (1 - manualWithholdingTaxRate / 100)).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </div>
+              )}
+
               <div className="grid gap-2">
-                <Label htmlFor="manual-sales">{lang === "KO" ? "POS 매출액 (USD)" : "POS Sales (USD)"}</Label>
+                <Label htmlFor="manual-sales-usd">{lang === "KO" ? "로열티 청구액 (USD 수기입력)" : "Royalty Due (USD Manual)"}</Label>
                 <Input 
-                  id="manual-sales"
+                  id="manual-sales-usd"
                   placeholder="0.00"
-                  value={manualSales}
-                  onChange={(e) => setManualSales(e.target.value)}
+                  value={royaltyAmountUsd}
+                  onChange={(e) => setRoyaltyAmountUsd(e.target.value)}
                   required
                 />
               </div>
-
-              {manualSales && (
-                <div className="bg-slate-50 border p-3 rounded-lg text-xs font-bold text-blue-600">
-                  {lang === "KO" ? "로열티 청구 금액 연산" : "Computed Royalty Invoice"}: 
-                  <span className="font-mono ml-1 text-sm">${(parseFloat(manualSales.replace(/[^0-9.]/g, '')) * (parseFloat(manualRate) / 100) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD</span>
-                </div>
-              )}
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setIsHQAddOpen(false)}>
@@ -1184,69 +1444,188 @@ export default function RoyaltyPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Upload/Edit Evidence Document Dialog Modal */}
-      <Dialog open={isUploadEvidenceOpen} onOpenChange={setIsUploadEvidenceOpen}>
-        <DialogContent className="sm:max-w-[400px]">
-          <form onSubmit={handleEvidenceOnlyUpload}>
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2 font-bold text-lg text-primary">
-                <FileText className="w-5 h-5 bg-blue-100 rounded-full text-blue-600 p-0.5" />
-                {lang === "KO" ? "매출 증빙 자료 등록 및 변경" : "Upload & Edit Sales Evidence"}
-              </DialogTitle>
-              <DialogDescription>
-                {lang === "KO"
-                  ? `${selectedRoyaltyForUpload?.month} 정산분에 대한 본사 검토 및 승인용 POS 실적 보고서(PDF, 이미지)를 업로드합니다.`
-                  : `Upload the POS performance document for the month of ${selectedRoyaltyForUpload?.month}.`}
-              </DialogDescription>
-            </DialogHeader>
-            <div className="grid gap-4 py-4">
-              {selectedRoyaltyForUpload?.evidenceUrl && (
-                <div className="bg-slate-50 border p-3 rounded-lg text-xs flex items-center justify-between">
-                  <div className="flex items-center gap-1.5 text-slate-600">
-                    <FileText className="w-4 h-4 text-blue-500" />
-                    <span className="font-semibold">{lang === "KO" ? "현재 등록된 증빙 서류" : "Current Document"}</span>
-                  </div>
-                  <a 
-                    href={selectedRoyaltyForUpload.evidenceUrl} 
-                    target="_blank" 
-                    rel="noreferrer"
-                    className="text-[11px] font-bold text-blue-600 hover:underline"
-                  >
-                    {lang === "KO" ? "파일 다운로드 / 보기" : "View / Download"}
-                  </a>
-                </div>
-              )}
-
-              <div className="grid gap-2 mt-4">
-                <Label>
-                  {selectedRoyaltyForUpload?.evidenceUrl 
-                    ? (lang === "KO" ? "새로운 파일로 교체" : "Replace with New File")
-                    : (lang === "KO" ? "증빙 서류 파일 선택" : "Select Evidence File")
-                  }
-                </Label>
-                <DropzoneUploader 
-                  onFileSelect={setEvidenceUploadFile} 
-                  selectedFile={evidenceUploadFile}
-                />
+      {/* Unified Document Center Dialog Modal */}
+      <Dialog open={isDocumentCenterOpen} onOpenChange={setIsDocumentCenterOpen}>
+        <DialogContent className="sm:max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 font-bold text-lg text-primary">
+              <FileText className="w-5 h-5 bg-blue-100 rounded-full text-blue-600 p-0.5" />
+              {lang === "KO" ? "증빙 서류 센터" : "Royalty Document Center"}
+            </DialogTitle>
+            <DialogDescription>
+              {lang === "KO"
+                ? `${selectedRoyaltyForDocs?.month} 정산 분에 대한 4대 증빙 서류를 관리합니다.`
+                : `Manage the 4 core settlement documents for target month ${selectedRoyaltyForDocs?.month}.`}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-5 py-4">
+            {/* 1. 인보이스 (Invoice) */}
+            <div className="flex items-center justify-between border-b pb-3.5">
+              <div>
+                <div className="font-extrabold text-sm text-slate-800">{lang === "KO" ? "1. 인보이스 (Invoice)" : "1. Invoice"}</div>
+                <div className="text-[11px] text-slate-400 font-medium">{lang === "KO" ? "본사 발행 공식 청구서" : "HQ Issued Claim Statement"}</div>
+              </div>
+              <div className="flex items-center gap-2">
+                {selectedRoyaltyForDocs?.invoiceUrl ? (
+                  <>
+                    <a href={selectedRoyaltyForDocs.invoiceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:underline">
+                      <FileText className="w-3.5 h-3.5" />
+                      {lang === "KO" ? "보기" : "View"}
+                    </a>
+                    {user?.role === "HQ" && (
+                      <Button size="sm" variant="ghost" onClick={() => handleDocumentDelete('invoice')} className="h-7 px-2 text-rose-500 hover:text-rose-600 hover:bg-rose-50 font-bold text-xs">
+                        {lang === "KO" ? "삭제" : "Delete"}
+                      </Button>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {user?.role === "HQ" ? (
+                      <>
+                        <input 
+                          type="file" 
+                          id="upload-doc-invoice" 
+                          className="hidden" 
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) handleDocumentUpload(file, 'invoice');
+                          }} 
+                        />
+                        <Button size="sm" variant="outline" onClick={() => document.getElementById('upload-doc-invoice')?.click()} disabled={uploadingDocType === 'invoice'} className="text-xs h-8 border-dashed hover:border-solid gap-1">
+                          {uploadingDocType === 'invoice' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+                          {lang === "KO" ? "업로드" : "Upload"}
+                        </Button>
+                      </>
+                    ) : (
+                      <span className="text-[11px] text-muted-foreground italic font-medium">{lang === "KO" ? "본사 발행 대기" : "Awaiting HQ Issue"}</span>
+                    )}
+                  </>
+                )}
               </div>
             </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => {
-                setIsUploadEvidenceOpen(false);
-                setEvidenceUploadFile(null);
-              }}>
-                {lang === "KO" ? "취소" : "Cancel"}
-              </Button>
-              <Button type="submit" disabled={uploadingEvidence} className="bg-blue-600 hover:bg-blue-700 text-white font-bold">
-                {uploadingEvidence ? (
+
+            {/* 2. 매출증빙 (Sales Evidence) */}
+            <div className="flex items-center justify-between border-b pb-3.5">
+              <div>
+                <div className="font-extrabold text-sm text-slate-800">{lang === "KO" ? "2. 매출증빙 (Sales Doc)" : "2. Sales Evidence"}</div>
+                <div className="text-[11px] text-slate-400 font-medium">{lang === "KO" ? "POS 실적 보고서 및 마감 문서" : "POS Performance Report"}</div>
+              </div>
+              <div className="flex items-center gap-2">
+                {(selectedRoyaltyForDocs?.salesEvidenceUrl || selectedRoyaltyForDocs?.evidenceUrl) ? (
                   <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5 animate-spin" />
-                    {lang === "KO" ? "서류 업로드 중..." : "Uploading..."}
+                    <a href={selectedRoyaltyForDocs.salesEvidenceUrl || selectedRoyaltyForDocs.evidenceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:underline">
+                      <FileText className="w-3.5 h-3.5" />
+                      {lang === "KO" ? "보기" : "View"}
+                    </a>
+                    <Button size="sm" variant="ghost" onClick={() => handleDocumentDelete('evidence')} className="h-7 px-2 text-rose-500 hover:text-rose-600 hover:bg-rose-50 font-bold text-xs">
+                      {lang === "KO" ? "삭제" : "Delete"}
+                    </Button>
                   </>
-                ) : (lang === "KO" ? "저장 및 제출" : "Save & Submit")}
-              </Button>
-            </DialogFooter>
-          </form>
+                ) : (
+                  <>
+                    <input 
+                      type="file" 
+                      id="upload-doc-evidence" 
+                      className="hidden" 
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleDocumentUpload(file, 'evidence');
+                      }} 
+                    />
+                    <Button size="sm" variant="outline" onClick={() => document.getElementById('upload-doc-evidence')?.click()} disabled={uploadingDocType === 'evidence'} className="text-xs h-8 border-dashed hover:border-solid gap-1">
+                      {uploadingDocType === 'evidence' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+                      {lang === "KO" ? "업로드" : "Upload"}
+                    </Button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* 3. 송금증 (Remittance Slip) */}
+            <div className="flex items-center justify-between border-b pb-3.5">
+              <div>
+                <div className="font-extrabold text-sm text-slate-800">{lang === "KO" ? "3. 송금증 (Remittance)" : "3. Remittance Slip"}</div>
+                <div className="text-[11px] text-slate-400 font-medium">{lang === "KO" ? "해외 송금 이체 확인증 (T/T Copy)" : "T/T Copy or Bank Slip"}</div>
+              </div>
+              <div className="flex items-center gap-2">
+                {(selectedRoyaltyForDocs?.remittanceUrl || selectedRoyaltyForDocs?.receiptUrl) ? (
+                  <>
+                    <a href={selectedRoyaltyForDocs.remittanceUrl || selectedRoyaltyForDocs.receiptUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:underline">
+                      <FileText className="w-3.5 h-3.5" />
+                      {lang === "KO" ? "보기" : "View"}
+                    </a>
+                    <Button size="sm" variant="ghost" onClick={() => handleDocumentDelete('remittance')} className="h-7 px-2 text-rose-500 hover:text-rose-600 hover:bg-rose-50 font-bold text-xs">
+                      {lang === "KO" ? "삭제" : "Delete"}
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    {user?.role !== "HQ" ? (
+                      <>
+                        <input 
+                          type="file" 
+                          id="upload-doc-remittance" 
+                          className="hidden" 
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) handleDocumentUpload(file, 'remittance');
+                          }} 
+                        />
+                        <Button size="sm" variant="outline" onClick={() => document.getElementById('upload-doc-remittance')?.click()} disabled={uploadingDocType === 'remittance'} className="text-xs h-8 border-dashed hover:border-solid gap-1">
+                          {uploadingDocType === 'remittance' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+                          {lang === "KO" ? "업로드" : "Upload"}
+                        </Button>
+                      </>
+                    ) : (
+                      <span className="text-[11px] text-muted-foreground italic font-medium">{lang === "KO" ? "파트너 송금 대기" : "Awaiting Partner Payment"}</span>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* 4. 원천징수영수증 (Withholding Tax Receipt) */}
+            <div className="flex items-center justify-between pb-1">
+              <div>
+                <div className="font-extrabold text-sm text-slate-800">{lang === "KO" ? "4. 원천징수영수증 (WHT)" : "4. Tax Receipt"}</div>
+                <div className="text-[11px] text-slate-400 font-medium">{lang === "KO" ? "세금 공제 영수증 (WHT Receipt)" : "Withholding Tax Receipt"}</div>
+              </div>
+              <div className="flex items-center gap-2">
+                {selectedRoyaltyForDocs?.withholdingTaxUrl ? (
+                  <>
+                    <a href={selectedRoyaltyForDocs.withholdingTaxUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:underline">
+                      <FileText className="w-3.5 h-3.5" />
+                      {lang === "KO" ? "보기" : "View"}
+                    </a>
+                    <Button size="sm" variant="ghost" onClick={() => handleDocumentDelete('withholding')} className="h-7 px-2 text-rose-500 hover:text-rose-600 hover:bg-rose-50 font-bold text-xs">
+                      {lang === "KO" ? "삭제" : "Delete"}
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <input 
+                      type="file" 
+                      id="upload-doc-withholding" 
+                      className="hidden" 
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleDocumentUpload(file, 'withholding');
+                      }} 
+                    />
+                    <Button size="sm" variant="outline" onClick={() => document.getElementById('upload-doc-withholding')?.click()} disabled={uploadingDocType === 'withholding'} className="text-xs h-8 border-dashed hover:border-solid gap-1">
+                      {uploadingDocType === 'withholding' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+                      {lang === "KO" ? "업로드" : "Upload"}
+                    </Button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" onClick={() => setIsDocumentCenterOpen(false)} className="bg-slate-900 hover:bg-slate-800 text-white font-bold">
+              {lang === "KO" ? "닫기" : "Close"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -1325,58 +1704,7 @@ export default function RoyaltyPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Partner bank slip (receipt) upload Dialog Modal */}
-      <Dialog open={isReceiptUploadOpen} onOpenChange={setIsReceiptUploadOpen}>
-        <DialogContent className="sm:max-w-[420px]">
-          <form onSubmit={handleReceiptUpload}>
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2 font-bold text-lg text-emerald-600">
-                <FileText className="w-5 h-5 bg-emerald-100 rounded-full text-emerald-600 p-0.5" />
-                {lang === "KO" ? "해외 송금 이체 확인증 등록" : "Submit Bank Wire Transfer Slip"}
-              </DialogTitle>
-              <DialogDescription>
-                {lang === "KO"
-                  ? `${selectedRoyaltyForReceipt?.month}월 청구 로열티 금액 $${Math.round(selectedRoyaltyForReceipt?.royaltyAmount || 0).toLocaleString()} 송금 내역에 대한 T/T Copy 또는 입금 확인증을 업로드하십시오.`
-                  : `Upload the bank wire transfer receipt (T/T Copy) for month ${selectedRoyaltyForReceipt?.month} royalty amount of $${Math.round(selectedRoyaltyForReceipt?.royaltyAmount || 0).toLocaleString()}.`}
-              </DialogDescription>
-            </DialogHeader>
-            <div className="grid gap-4 py-4">
-              {selectedRoyaltyForReceipt?.receiptUrl && (
-                <div className="bg-emerald-50 border border-emerald-200 p-2.5 rounded text-xs font-bold text-emerald-700">
-                  {lang === "KO" ? "기존 업로드된 송금 이체증이 존재합니다. 새 파일로 갱신하여 덮어씁니다." : "An active bank slip is already uploaded. Choosing a new file will overwrite it."}
-                </div>
-              )}
-              <div className="grid gap-2 mt-4">
-                <Label>
-                  {lang === "KO" ? "송금 증빙 서류 선택" : "Select Wire Receipt File"}
-                </Label>
-                <DropzoneUploader 
-                  onFileSelect={setReceiptFile} 
-                  selectedFile={receiptFile}
-                  subLabel={lang === "KO" ? "* 은행 이체 확인 PDF 문서 또는 사진 이미지(*.jpg, *.png)만 업로드 가능합니다." : "* Accepts PDF documents or image files."}
-                />
-              </div>
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => {
-                setIsReceiptUploadOpen(false);
-                setReceiptFile(null);
-                setSelectedRoyaltyForReceipt(null);
-              }}>
-                {lang === "KO" ? "취소" : "Cancel"}
-              </Button>
-              <Button type="submit" disabled={uploadingReceipt} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold">
-                {uploadingReceipt ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5 animate-spin" />
-                    {lang === "KO" ? "증빙 서류 전송 중..." : "Uploading..."}
-                  </>
-                ) : (lang === "KO" ? "송금 완료 보고" : "Report Payment")}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+
 
       {/* HQ Deposit Voucher upload Dialog Modal */}
       <Dialog open={isVoucherUploadOpen} onOpenChange={setIsVoucherUploadOpen}>

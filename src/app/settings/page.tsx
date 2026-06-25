@@ -33,6 +33,7 @@ export default function SettingsPage() {
 
   // 설정 로드
   useEffect(() => {
+    if (!user) return;
     async function loadSettings() {
       try {
         const docRef = doc(db, "system", "config");
@@ -52,7 +53,7 @@ export default function SettingsPage() {
       }
     }
     loadSettings();
-  }, []);
+  }, [user]);
 
   const handleSaveConfig = async (e: React.FormEvent) => {
     e.preventDefault();

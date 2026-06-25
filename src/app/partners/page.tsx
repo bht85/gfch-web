@@ -36,7 +36,7 @@ export default function PartnersPage() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
   
-  const [newPartner, setNewPartner] = useState({ name: "", country: "", type: "MF", startDate: "", endDate: "", contacts: [], royaltyRate: 3.5 });
+  const [newPartner, setNewPartner] = useState({ name: "", country: "대만", type: "MF", startDate: "", endDate: "", contacts: [], royaltyRate: 3.5, withholdingTaxRate: 0, storesStr: "1호점, 2호점" });
   const [editingPartner, setEditingPartner] = useState<any>(null);
   const [newContact, setNewContact] = useState({ name: "", email: "", role: "" });
   
@@ -113,19 +113,40 @@ export default function PartnersPage() {
   const handleAddPartner = async () => {
     if (!newPartner.name || !newPartner.country) return;
     try {
-      await addDoc(collection(db, "partners"), newPartner);
-      setNewPartner({ name: "", country: "", type: "MF", startDate: "", endDate: "", contacts: [], royaltyRate: 3.5 });
+      const stores = newPartner.storesStr
+        ? newPartner.storesStr.split(",").map(s => s.trim()).filter(Boolean)
+        : [];
+      const dataToSave = {
+        name: newPartner.name,
+        country: newPartner.country,
+        type: newPartner.type,
+        startDate: newPartner.startDate,
+        endDate: newPartner.endDate,
+        contacts: newPartner.contacts,
+        royaltyRate: newPartner.royaltyRate,
+        withholdingTaxRate: newPartner.withholdingTaxRate || 0,
+        stores
+      };
+      await addDoc(collection(db, "partners"), dataToSave);
+      setNewPartner({ name: "", country: "대만", type: "MF", startDate: "", endDate: "", contacts: [], royaltyRate: 3.5, withholdingTaxRate: 0, storesStr: "1호점, 2호점" });
       setIsAddModalOpen(false);
     } catch (error) {
-      alert("Error adding partner");
+      alert("Error adding partner: " + error);
     }
   };
 
   const handleUpdatePartner = async () => {
     if (!editingPartner) return;
     try {
-      const { id, ...data } = editingPartner;
-      await updateDoc(doc(db, "partners", id), data);
+      const { id, storesStr, ...data } = editingPartner;
+      const stores = storesStr
+        ? storesStr.split(",").map((s: string) => s.trim()).filter(Boolean)
+        : [];
+      const dataToSave = {
+        ...data,
+        stores
+      };
+      await updateDoc(doc(db, "partners", id), dataToSave);
       
       // 🔒 자동 초대 연동 (Phase 2)
       if (data.contacts && Array.isArray(data.contacts)) {
@@ -351,7 +372,18 @@ export default function PartnersPage() {
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="country">{lang === "KO" ? "국가" : "Country"}</Label>
-                <Input id="country" value={newPartner.country} onChange={(e) => setNewPartner({ ...newPartner, country: e.target.value })} placeholder="Country" />
+                <select
+                  id="country"
+                  className="flex h-10 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  value={newPartner.country}
+                  onChange={(e) => setNewPartner({ ...newPartner, country: e.target.value })}
+                >
+                  <option value="대만">대만</option>
+                  <option value="필리핀">필리핀</option>
+                  <option value="싱가포르">싱가포르</option>
+                  <option value="말레이시아">말레이시아</option>
+                  <option value="홍콩">홍콩</option>
+                </select>
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="type">{lang === "KO" ? "유형" : "Type"}</Label>
@@ -375,9 +407,19 @@ export default function PartnersPage() {
                   <Input id="endDate" type="date" value={newPartner.endDate || ""} onChange={(e) => setNewPartner({ ...newPartner, endDate: e.target.value })} />
                 </div>
               </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="royaltyRate">{lang === "KO" ? "로열티 요율 (%)" : "Royalty Rate (%)"}</Label>
+                  <Input id="royaltyRate" type="number" step="0.1" placeholder="3.5" value={newPartner.royaltyRate} onChange={(e) => setNewPartner({ ...newPartner, royaltyRate: parseFloat(e.target.value) || 0 })} />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="withholdingTaxRate">{lang === "KO" ? "원천징수 요율 (%)" : "Withholding Tax Rate (%)"}</Label>
+                  <Input id="withholdingTaxRate" type="number" step="0.1" placeholder="0.0" value={newPartner.withholdingTaxRate || 0} onChange={(e) => setNewPartner({ ...newPartner, withholdingTaxRate: parseFloat(e.target.value) || 0 })} />
+                </div>
+              </div>
               <div className="grid gap-2">
-                <Label htmlFor="royaltyRate">{lang === "KO" ? "로열티 요율 (%)" : "Royalty Rate (%)"}</Label>
-                <Input id="royaltyRate" type="number" step="0.1" placeholder="3.5" value={newPartner.royaltyRate} onChange={(e) => setNewPartner({ ...newPartner, royaltyRate: parseFloat(e.target.value) || 0 })} />
+                <Label htmlFor="storesStr">{lang === "KO" ? "매장 목록 (쉼표 구분)" : "Store List (Comma Separated)"}</Label>
+                <Input id="storesStr" value={newPartner.storesStr} onChange={(e) => setNewPartner({ ...newPartner, storesStr: e.target.value })} placeholder="예: 1호점, 2호점" />
               </div>
             </div>
             <DialogFooter>
@@ -428,7 +470,11 @@ export default function PartnersPage() {
                       variant="ghost" 
                       size="sm" 
                       onClick={() => {
-                        setEditingPartner({ ...partner });
+                        setEditingPartner({ 
+                          ...partner,
+                          withholdingTaxRate: partner.withholdingTaxRate !== undefined ? partner.withholdingTaxRate : 0,
+                          storesStr: partner.stores ? partner.stores.join(", ") : ""
+                        });
                         setIsEditModalOpen(true);
                       }}
                     >
@@ -440,7 +486,7 @@ export default function PartnersPage() {
                   <TableRow className="bg-muted/30">
                     <TableCell colSpan={7} className="p-0">
                       <div className="px-12 py-4 space-y-4">
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-background rounded-lg border text-xs shadow-sm">
+                        <div className="grid grid-cols-2 md:grid-cols-6 gap-4 p-4 bg-background rounded-lg border text-xs shadow-sm">
                           <div>
                             <span className="text-muted-foreground block font-medium mb-1">{lang === "KO" ? "업체명" : "Company"}</span>
                             <span className="font-bold text-slate-800">{partner.name}</span>
@@ -454,8 +500,16 @@ export default function PartnersPage() {
                             <span className="font-extrabold text-blue-600 text-sm">{partner.royaltyRate !== undefined ? partner.royaltyRate : 3.5}%</span>
                           </div>
                           <div>
+                            <span className="text-muted-foreground block font-medium mb-1">{lang === "KO" ? "원천징수 요율" : "Withholding Tax Rate"}</span>
+                            <span className="font-extrabold text-amber-600 text-sm">{partner.withholdingTaxRate !== undefined ? partner.withholdingTaxRate : 0}%</span>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground block font-medium mb-1">{lang === "KO" ? "매장 목록" : "Stores"}</span>
+                            <span className="font-bold text-slate-700">{partner.stores?.length ? partner.stores.join(", ") : "N/A"}</span>
+                          </div>
+                          <div>
                             <span className="text-muted-foreground block font-medium mb-1">{lang === "KO" ? "유효 기간" : "Validity"}</span>
-                            <span className="font-bold text-slate-700">{partner.startDate || "N/A"} ~ {partner.endDate || (lang === "KO" ? "진행 중" : "Active")}</span>
+                            <span className="font-bold text-slate-700 text-[10px]">{partner.startDate || "N/A"} ~ {partner.endDate || (lang === "KO" ? "진행 중" : "Active")}</span>
                           </div>
                         </div>
 
@@ -464,7 +518,14 @@ export default function PartnersPage() {
                             <User className="h-4 w-4" />
                             {lang === "KO" ? "담당자 정보" : "Contact Information"}
                           </div>
-                          <Button variant="outline" size="sm" className="h-8 text-[10px]" onClick={() => { setEditingPartner({ ...partner }); setIsEditModalOpen(true); }}>
+                          <Button variant="outline" size="sm" className="h-8 text-[10px]" onClick={() => { 
+                            setEditingPartner({ 
+                              ...partner,
+                              withholdingTaxRate: partner.withholdingTaxRate !== undefined ? partner.withholdingTaxRate : 0,
+                              storesStr: partner.stores ? partner.stores.join(", ") : ""
+                            }); 
+                            setIsEditModalOpen(true); 
+                          }}>
                             <Plus className="mr-1 h-3 w-3" /> {lang === "KO" ? "담당자 추가/수정" : "Edit Contacts"}
                           </Button>
                         </div>
@@ -548,7 +609,17 @@ export default function PartnersPage() {
                 </div>
                 <div className="grid gap-2">
                   <Label>{lang === "KO" ? "국가" : "Country"}</Label>
-                  <Input value={editingPartner.country} onChange={(e) => setEditingPartner({ ...editingPartner, country: e.target.value })} />
+                  <select
+                    className="flex h-10 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                    value={editingPartner.country}
+                    onChange={(e) => setEditingPartner({ ...editingPartner, country: e.target.value })}
+                  >
+                    <option value="대만">대만</option>
+                    <option value="필리핀">필리핀</option>
+                    <option value="싱가포르">싱가포르</option>
+                    <option value="말레이시아">말레이시아</option>
+                    <option value="홍콩">홍콩</option>
+                  </select>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="grid gap-2">
@@ -560,9 +631,19 @@ export default function PartnersPage() {
                     <Input type="date" value={editingPartner.endDate || ""} onChange={(e) => setEditingPartner({ ...editingPartner, endDate: e.target.value })} />
                   </div>
                 </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label>{lang === "KO" ? "로열티 요율 (%)" : "Royalty Rate (%)"}</Label>
+                    <Input type="number" step="0.1" value={editingPartner.royaltyRate !== undefined ? editingPartner.royaltyRate : 3.5} onChange={(e) => setEditingPartner({ ...editingPartner, royaltyRate: parseFloat(e.target.value) || 0 })} />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>{lang === "KO" ? "원천징수 요율 (%)" : "Withholding Tax Rate (%)"}</Label>
+                    <Input type="number" step="0.1" value={editingPartner.withholdingTaxRate !== undefined ? editingPartner.withholdingTaxRate : 0} onChange={(e) => setEditingPartner({ ...editingPartner, withholdingTaxRate: parseFloat(e.target.value) || 0 })} />
+                  </div>
+                </div>
                 <div className="grid gap-2">
-                  <Label>{lang === "KO" ? "로열티 요율 (%)" : "Royalty Rate (%)"}</Label>
-                  <Input type="number" step="0.1" value={editingPartner.royaltyRate !== undefined ? editingPartner.royaltyRate : 3.5} onChange={(e) => setEditingPartner({ ...editingPartner, royaltyRate: parseFloat(e.target.value) || 0 })} />
+                  <Label>{lang === "KO" ? "매장 목록 (쉼표 구분)" : "Store List (Comma Separated)"}</Label>
+                  <Input value={editingPartner.storesStr || ""} onChange={(e) => setEditingPartner({ ...editingPartner, storesStr: e.target.value })} placeholder="예: 1호점, 2호점" />
                 </div>
               </div>
 

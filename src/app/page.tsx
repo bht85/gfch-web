@@ -64,6 +64,7 @@ export default function Dashboard() {
 
   // Firestore 실시간 공지사항 조회
   useEffect(() => {
+    if (!user) return;
     const annRef = doc(db, "config", "announcement");
     const unsubscribe = onSnapshot(annRef, (docSnap) => {
       if (docSnap.exists()) {
@@ -81,7 +82,7 @@ export default function Dashboard() {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [user]);
 
   // Firestore 실시간 주문 조회 (본사는 전체, 파트너사는 본인 소속만)
   useEffect(() => {
