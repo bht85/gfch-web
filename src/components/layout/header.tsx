@@ -49,13 +49,13 @@ export function Header() {
         
         <DropdownMenu>
           <DropdownMenuTrigger className="flex items-center gap-3 hover:opacity-80 transition-opacity focus:outline-none ml-2">
-            <div className="text-right hidden sm:block">
-              <p className="text-xs font-bold">{user?.name || "Login Required"}</p>
-              <p className="text-[10px] text-muted-foreground">{user?.role === "HQ" ? (lang === "KO" ? "본사 관리자" : "HQ Admin") : (lang === "KO" ? "MF 파트너" : "MF Partner")}</p>
-            </div>
-            <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center text-primary border border-primary/20 shadow-sm">
+            <span className="text-right hidden sm:block">
+              <span className="block text-xs font-bold">{user?.name || "Login Required"}</span>
+              <span className="block text-[10px] text-muted-foreground">{user?.role === "HQ" ? (lang === "KO" ? "본사 관리자" : "HQ Admin") : (lang === "KO" ? "MF 파트너" : "MF Partner")}</span>
+            </span>
+            <span className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center text-primary border border-primary/20 shadow-sm">
               <UserCircle className="h-6 w-6" />
-            </div>
+            </span>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
             <DropdownMenuGroup>

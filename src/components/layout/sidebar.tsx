@@ -75,6 +75,7 @@ export function Sidebar() {
                     <li><Link href="/orders/shipping" className="block rounded-md px-3 py-1.5 text-xs text-muted-foreground hover:text-primary hover:bg-muted">{t("shipping")}</Link></li>
                     <li><Link href="/orders/products" className="block rounded-md px-3 py-1.5 text-xs text-muted-foreground hover:text-primary hover:bg-muted">{t("products")}</Link></li>
                     <li><Link href="/orders/pricing" className="block rounded-md px-3 py-1.5 text-xs text-muted-foreground hover:text-primary hover:bg-muted">{t("pricing")}</Link></li>
+                    <li><Link href="/orders/billing" className="block rounded-md px-3 py-1.5 text-xs text-muted-foreground hover:text-primary hover:bg-muted">{lang === "KO" ? "매출/매입 대장" : "Sales & Cost Ledger"}</Link></li>
                   </>
                 )}
               </ul>
@@ -83,13 +84,13 @@ export function Sidebar() {
 
           {isHQ && (
             <>
-              {/* <li>
+              <li>
                 <Link href="/store-openings" className="flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground hover:text-primary hover:bg-muted transition-all">
                   <Building2 className="h-5 w-5 text-violet-500" />
                   <span className="font-medium">{lang === "KO" ? "매장 오픈 관리" : "Store Openings"}</span>
                   <span className="ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-300 shrink-0">개발중</span>
                 </Link>
-              </li> */}
+              </li>
               <li>
                 <Link href="/sales" className="flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground hover:text-primary hover:bg-muted transition-all">
                   <DollarSign className="h-5 w-5 text-emerald-500" />

@@ -153,6 +153,30 @@ const DocumentRow = ({
 };
 
 
+let nanumGothicBase64Cache: string | null = null;
+
+async function getNanumGothicBase64(): Promise<string> {
+  if (nanumGothicBase64Cache) return nanumGothicBase64Cache;
+  const fontUrl = "https://fonts.gstatic.com/s/nanumgothic/v23/PNggR5G7wG_vLw8v9u19IuFubV0e.ttf";
+  const response = await fetch(fontUrl);
+  if (!response.ok) {
+    throw new Error("Failed to fetch Korean font");
+  }
+  const blob = await response.blob();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64data = reader.result as string;
+      const base64 = base64data.split(",")[1];
+      nanumGothicBase64Cache = base64;
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+
 export default function IntegratedOrderBoardPage() {
   const { user, loading: authLoading } = useAuth();
   const { t, lang } = useTranslation();
@@ -166,6 +190,7 @@ export default function IntegratedOrderBoardPage() {
   const [confirmDelete, setConfirmDelete] = useState<{key: string, idx: number} | null>(null);
   const [loading, setLoading] = useState(true);
   const [previewPdfUrl, setPreviewPdfUrl] = useState<string | null>(null);
+  const [generatingPdf, setGeneratingPdf] = useState(false);
 
   // 보안 체크: 본사 관리자만 접근 가능
   useEffect(() => {
@@ -216,60 +241,79 @@ export default function IntegratedOrderBoardPage() {
     }
   };
 
-  const generateInvoicePDF = (order: any) => {
-    const doc = new jsPDF();
-    
-    // Header
-    doc.setFontSize(22);
-    doc.setTextColor(40);
-    doc.text("PROFORMA INVOICE", 105, 20, { align: "center" });
-    
-    // Company Info
-    doc.setFontSize(10);
-    doc.text("GFCH Headquarters (Global Franchise Control Hub)", 14, 40);
-    doc.text("123 Business Road, Seoul, Korea", 14, 45);
-    doc.text("Email: ops@gfch-global.com | Web: www.gfch-global.com", 14, 50);
-    
-    // Invoice Info
-    doc.setFontSize(10);
-    doc.text(`Invoice No: INV-${order.id}`, 140, 40);
-    doc.text(`Date: ${order.date}`, 140, 45);
-    doc.text(`Partner: ${order.mf}`, 140, 50);
-    
-    // Items Table
-    const tableData = order.items?.map((item: any) => [
-      item.name,
-      (item.qty || 0).toLocaleString(),
-      `$${(item.price || 0).toLocaleString()}`,
-      `$${((item.qty || 0) * (item.price || 0)).toLocaleString()}`
-    ]) || [];
-    
-    autoTable(doc, {
-      startY: 60,
-      head: [['Product Name', 'Quantity', 'Unit Price', 'Total']],
-      body: tableData,
-      foot: [['', '', 'GRAND TOTAL', order.amount]],
-      theme: 'grid',
-      headStyles: { fillColor: [41, 128, 185], textColor: 255 },
-      footStyles: { fillColor: [240, 240, 240], textColor: 0, fontStyle: 'bold' },
-    });
-    
-    // Banking Info
-    const finalY = (doc as any).lastAutoTable.finalY + 10;
-    doc.setFontSize(12);
-    doc.text("Banking Information for Remittance", 14, finalY);
-    doc.setFontSize(9);
-    doc.text("Bank Name: GLOBAL STANDARD BANK", 14, finalY + 7);
-    doc.text("Account No: 110-456-789012 (USD)", 14, finalY + 12);
-    doc.text("SWIFT Code: GBSBKRSExxx", 14, finalY + 17);
-    doc.text("Beneficiary: GFCH CO., LTD.", 14, finalY + 22);
-    
-    doc.setFontSize(8);
-    doc.setTextColor(150);
-    doc.text("This is a computer-generated document and no signature is required.", 105, finalY + 40, { align: "center" });
-    
-    const blobUrl = doc.output('bloburl');
-    setPreviewPdfUrl(blobUrl.toString());
+  const generateInvoicePDF = async (order: any) => {
+    setGeneratingPdf(true);
+    try {
+      const doc = new jsPDF();
+      
+      try {
+        const fontBase64 = await getNanumGothicBase64();
+        doc.addFileToVFS("NanumGothic.ttf", fontBase64);
+        doc.addFont("NanumGothic.ttf", "NanumGothic", "normal");
+        doc.addFont("NanumGothic.ttf", "NanumGothic", "bold");
+        doc.setFont("NanumGothic", "normal");
+      } catch (error) {
+        console.error("Failed to load Korean font, using default font:", error);
+      }
+      
+      // Header
+      doc.setFontSize(22);
+      doc.setTextColor(40);
+      doc.text("PROFORMA INVOICE", 105, 20, { align: "center" });
+      
+      // Company Info
+      doc.setFontSize(10);
+      doc.text("GFCH Headquarters (Global Franchise Control Hub)", 14, 40);
+      doc.text("123 Business Road, Seoul, Korea", 14, 45);
+      doc.text("Email: ops@gfch-global.com | Web: www.gfch-global.com", 14, 50);
+      
+      // Invoice Info
+      doc.setFontSize(10);
+      doc.text(`Invoice No: INV-${order.id}`, 140, 40);
+      doc.text(`Date: ${order.date}`, 140, 45);
+      doc.text(`Partner: ${order.mf}`, 140, 50);
+      
+      // Items Table
+      const tableData = order.items?.map((item: any) => [
+        item.name,
+        (item.qty || 0).toLocaleString(),
+        `$${(item.price || 0).toLocaleString()}`,
+        `$${((item.qty || 0) * (item.price || 0)).toLocaleString()}`
+      ]) || [];
+      
+      autoTable(doc, {
+        startY: 60,
+        head: [['Product Name', 'Quantity', 'Unit Price', 'Total']],
+        body: tableData,
+        foot: [['', '', 'GRAND TOTAL', order.amount]],
+        theme: 'grid',
+        headStyles: { fillColor: [41, 128, 185], textColor: 255 },
+        footStyles: { fillColor: [240, 240, 240], textColor: 0, fontStyle: 'bold' },
+        styles: { font: "NanumGothic" }
+      });
+      
+      // Banking Info
+      const finalY = (doc as any).lastAutoTable.finalY + 10;
+      doc.setFontSize(12);
+      doc.text("Banking Information for Remittance", 14, finalY);
+      doc.setFontSize(9);
+      doc.text("Bank Name: GLOBAL STANDARD BANK", 14, finalY + 7);
+      doc.text("Account No: 110-456-789012 (USD)", 14, finalY + 12);
+      doc.text("SWIFT Code: GBSBKRSExxx", 14, finalY + 17);
+      doc.text("Beneficiary: GFCH CO., LTD.", 14, finalY + 22);
+      
+      doc.setFontSize(8);
+      doc.setTextColor(150);
+      doc.text("This is a computer-generated document and no signature is required.", 105, finalY + 40, { align: "center" });
+      
+      const blobUrl = doc.output('bloburl');
+      setPreviewPdfUrl(blobUrl.toString());
+    } catch (err) {
+      console.error("Error generating PDF:", err);
+      alert(lang === "KO" ? "PDF 생성 중 오류가 발생했습니다." : "Error occurred while generating PDF.");
+    } finally {
+      setGeneratingPdf(false);
+    }
   };
 
   const handleFileUpload = async (file: File | undefined, docKey: string) => {
@@ -495,8 +539,23 @@ export default function IntegratedOrderBoardPage() {
                       )}
                       
                       <div className="flex justify-between font-bold text-base border-t pt-2 mb-2"><span>{t("totalSum")}</span> <span className="text-primary">{selectedOrder.amount}</span></div>
-                      <Button variant="outline" className="w-full bg-white" onClick={() => generateInvoicePDF(selectedOrder)}>
-                        <FileDown className="w-4 h-4 mr-2" /> {lang === "KO" ? "인보이스 (PI) PDF 다운로드" : "Download Invoice (PI) PDF"}
+                      <Button 
+                        variant="outline" 
+                        className="w-full bg-white" 
+                        onClick={() => generateInvoicePDF(selectedOrder)}
+                        disabled={generatingPdf}
+                      >
+                        {generatingPdf ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin text-primary" />
+                            {lang === "KO" ? "PDF 생성 중..." : "Generating PDF..."}
+                          </>
+                        ) : (
+                          <>
+                            <FileDown className="w-4 h-4 mr-2" />
+                            {lang === "KO" ? "인보이스 (PI) PDF 다운로드" : "Download Invoice (PI) PDF"}
+                          </>
+                        )}
                       </Button>
                     </div>
                     {nextStage && (

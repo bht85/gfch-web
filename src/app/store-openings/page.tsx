@@ -207,14 +207,16 @@ export default function StoreOpeningsPage() {
       const data = snap.docs.map((d) => ({ id: d.id, ...d.data() })) as StoreOpening[];
       setStores(data);
       setLoading(false);
-      // 선택된 매장 정보 실시간 갱신
-      if (selectedStore) {
-        const updated = data.find((s) => s.id === selectedStore.id);
-        if (updated) setSelectedStore(updated);
-      }
     }, () => setLoading(false));
     return () => unsub();
   }, [user]);
+
+  // ── 선택된 매장 정보 실시간 동기화 ──────────────────────────────────────────
+  useEffect(() => {
+    if (!selectedStore) return;
+    const updated = stores.find((s) => s.id === selectedStore.id);
+    if (updated) setSelectedStore(updated);
+  }, [stores]);
 
   // ── 신규 매장 생성 ─────────────────────────────────────────────────────────
   const handleAddStore = async () => {
@@ -283,13 +285,17 @@ export default function StoreOpeningsPage() {
     });
   };
 
-  // ── 일정 항목 업데이트 ─────────────────────────────────────────────────────
-  const handleScheduleUpdate = async (store: StoreOpening, key: keyof StoreOpening["schedule"], field: "date" | "done", value: string | boolean) => {
-    const updated = { ...store.schedule, [key]: { ...store.schedule[key], [field]: value } };
-    await updateDoc(doc(db, "storeOpenings", store.id), {
-      schedule: updated,
-      updatedAt: serverTimestamp(),
-    });
+  // ── 일정 전체 저장 ─────────────────────────────────────────────────────
+  const handleScheduleSave = async (store: StoreOpening, scheduleData: StoreOpening["schedule"]) => {
+    setSaving(true);
+    try {
+      await updateDoc(doc(db, "storeOpenings", store.id), {
+        schedule: scheduleData,
+        updatedAt: serverTimestamp(),
+      });
+    } finally {
+      setSaving(false);
+    }
   };
 
   // ── 교육 정보 업데이트 ─────────────────────────────────────────────────────
@@ -585,7 +591,8 @@ export default function StoreOpeningsPage() {
                 <ScheduleTab
                   store={selectedStore}
                   isHQ={isHQ}
-                  onUpdate={(key, field, value) => handleScheduleUpdate(selectedStore, key, field, value)}
+                  saving={saving}
+                  onSave={(scheduleData) => handleScheduleSave(selectedStore, scheduleData)}
                 />
               )}
 
@@ -809,16 +816,61 @@ const SCHEDULE_LABELS: { key: keyof StoreOpening["schedule"]; label: string; ico
   { key: "softOpening", label: "Soft Opening",       icon: "🌅" },
 ];
 
-function ScheduleTab({ store, isHQ, onUpdate }: { store: StoreOpening; isHQ: boolean; onUpdate: (key: keyof StoreOpening["schedule"], field: "date" | "done", value: any) => void }) {
-  const schedule = store.schedule || {};
+function ScheduleTab({ store, isHQ, saving, onSave }: { store: StoreOpening; isHQ: boolean; saving: boolean; onSave: (schedule: StoreOpening["schedule"]) => Promise<void> }) {
+  const [localSchedule, setLocalSchedule] = useState<StoreOpening["schedule"]>(store.schedule || DEFAULT_SCHEDULE);
+  const [saved, setSaved] = useState(false);
+
+  // store가 바뀌면 로컬 상태 초기화
+  useEffect(() => {
+    setLocalSchedule(store.schedule || DEFAULT_SCHEDULE);
+    setSaved(false);
+  }, [store.id, store.schedule]);
+
+  const hasChanges = JSON.stringify(localSchedule) !== JSON.stringify(store.schedule || DEFAULT_SCHEDULE);
+
+  const handleLocalUpdate = (key: keyof StoreOpening["schedule"], field: "date" | "done", value: string | boolean) => {
+    setLocalSchedule(prev => ({
+      ...prev,
+      [key]: { ...prev[key], [field]: value },
+    }));
+    setSaved(false);
+  };
+
+  const handleSave = async () => {
+    await onSave(localSchedule);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+
   return (
     <div className="space-y-3">
-      <p className="text-xs text-muted-foreground mb-4 flex items-center gap-1">
-        <Info className="w-3.5 h-3.5" />
-        날짜 입력 후 완료 체크로 진행 현황을 관리하세요.
-      </p>
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-xs text-muted-foreground flex items-center gap-1">
+          <Info className="w-3.5 h-3.5" />
+          날짜 입력 후 완료 체크로 진행 현황을 관리하세요.
+        </p>
+        {isHQ && (
+          <Button
+            size="sm"
+            onClick={handleSave}
+            disabled={!hasChanges || saving}
+            className={cn(
+              "h-8 px-4 text-xs font-semibold transition-all",
+              saved && "bg-emerald-500 hover:bg-emerald-500"
+            )}
+          >
+            {saving ? (
+              <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />저장 중...</>
+            ) : saved ? (
+              <><Check className="w-3.5 h-3.5 mr-1.5" />저장 완료!</>
+            ) : (
+              "저장"
+            )}
+          </Button>
+        )}
+      </div>
       {SCHEDULE_LABELS.map(({ key, label, icon }) => {
-        const item = schedule[key] || { date: "", done: false };
+        const item = localSchedule[key] || { date: "", done: false };
         return (
           <div
             key={key}
@@ -835,14 +887,14 @@ function ScheduleTab({ store, isHQ, onUpdate }: { store: StoreOpening; isHQ: boo
                   type="date"
                   className="mt-1 h-7 text-xs"
                   value={item.date || ""}
-                  onChange={(e) => onUpdate(key, "date", e.target.value)}
+                  onChange={(e) => handleLocalUpdate(key, "date", e.target.value)}
                 />
               ) : (
                 <p className="text-xs text-muted-foreground mt-0.5">{item.date || "날짜 미정"}</p>
               )}
             </div>
             <button
-              onClick={() => isHQ && onUpdate(key, "done", !item.done)}
+              onClick={() => isHQ && handleLocalUpdate(key, "done", !item.done)}
               disabled={!isHQ}
               className={cn(
                 "w-8 h-8 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all",
