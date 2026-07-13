@@ -154,6 +154,109 @@ export default function SalesCostLedgerPage() {
     document.body.removeChild(link);
   };
 
+  // 워드(.doc) 다운로드 기능 (HTML을 Word가 읽을 수 있는 문서 형식으로 다운로드)
+  const exportToWord = () => {
+    const title = lang === "KO" ? "글로벌 매출/매입 대장 보고서" : "Global Sales & Cost Ledger Report";
+    const dateStr = new Date().toISOString().split('T')[0];
+    
+    const htmlContent = `
+      <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+      <head>
+        <title>${title}</title>
+        <style>
+          body { font-family: 'Malgun Gothic', Arial, sans-serif; line-height: 1.6; padding: 20px; }
+          h1 { text-align: center; color: #1e3a8a; font-size: 24px; margin-bottom: 5px; }
+          .subtitle { text-align: center; color: #64748b; font-size: 12px; margin-bottom: 30px; }
+          .section-title { font-size: 16px; font-weight: bold; color: #0f172a; margin-top: 20px; margin-bottom: 10px; border-bottom: 2px solid #cbd5e1; padding-bottom: 5px; }
+          .summary-table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+          .summary-table th, .summary-table td { border: 1px solid #cbd5e1; padding: 10px; text-align: center; font-size: 12px; }
+          .summary-table th { background-color: #f8fafc; font-weight: bold; color: #334155; }
+          .ledger-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+          .ledger-table th, .ledger-table td { border: 1px solid #cbd5e1; padding: 8px; text-align: left; font-size: 10px; }
+          .ledger-table th { background-color: #1e3a8a; color: #ffffff; font-weight: bold; text-align: center; }
+          .text-right { text-align: right; }
+          .text-center { text-align: center; }
+          .bold { font-weight: bold; }
+        </style>
+      </head>
+      <body>
+        <h1>${title}</h1>
+        <p class="subtitle">${lang === "KO" ? "출력 일자" : "Export Date"}: ${dateStr}</p>
+        
+        <div class="section-title">1. ${lang === "KO" ? "재무 요약 (Financial Summary)" : "Financial Summary"}</div>
+        <table class="summary-table">
+          <thead>
+            <tr>
+              <th>${lang === "KO" ? "총 매출액 (공급가)" : "Total Revenue"}</th>
+              <th>${lang === "KO" ? "총 매입액 (USD)" : "Total Cost (USD)"}</th>
+              <th>${lang === "KO" ? "총 매입액 (KRW)" : "Total Cost (KRW)"}</th>
+              <th>${lang === "KO" ? "총 마진액" : "Total Margin"}</th>
+              <th>${lang === "KO" ? "평균 마진율" : "Avg Margin %"}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="color: #2563eb; font-weight: bold; font-size: 14px;">$${totalSales.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
+              <td style="color: #dc2626; font-size: 14px;">$${totalCost.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
+              <td style="color: #dc2626; font-weight: bold; font-size: 14px;">₩${Math.round(totalCost * systemExchangeRate).toLocaleString()}</td>
+              <td style="color: #16a34a; font-weight: bold; font-size: 14px;">$${totalMargin.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
+              <td style="color: #7c3aed; font-weight: bold; font-size: 14px;">${marginRate.toFixed(2)}%</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="section-title">2. ${lang === "KO" ? "발주별 상세 대장 내역 (Ledger Details)" : "Ledger Details"}</div>
+        <table class="ledger-table">
+          <thead>
+            <tr>
+              <th>${lang === "KO" ? "MF 파트너" : "Partner"}</th>
+              <th>${lang === "KO" ? "발주 번호 (PO)" : "PO Number"}</th>
+              <th>${lang === "KO" ? "일자" : "Date"}</th>
+              <th>${lang === "KO" ? "매출액 (USD)" : "Revenue (USD)"}</th>
+              <th>${lang === "KO" ? "매입액 (USD)" : "Cost (USD)"}</th>
+              <th>${lang === "KO" ? "매입액 (KRW)" : "Cost (KRW)"}</th>
+              <th>${lang === "KO" ? "마진액 (USD)" : "Margin (USD)"}</th>
+              <th>${lang === "KO" ? "마진율" : "Margin %"}</th>
+              <th>${lang === "KO" ? "진행 단계" : "Stage"}</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${filteredOrders.map(order => {
+              const sales = typeof order.totalAmount === "number" ? order.totalAmount : parseAmount(order.amount);
+              const cost = calculateOrderCost(order);
+              const costKrw = cost * systemExchangeRate;
+              const margin = sales - cost;
+              const rate = sales > 0 ? (margin / sales) * 100 : 0;
+              return `
+                <tr>
+                  <td class="bold">${order.partnerName || "MF Partner"}</td>
+                  <td style="font-family: monospace;">${order.id}</td>
+                  <td class="text-center">${order.date}</td>
+                  <td class="text-right bold" style="color: #2563eb;">$${sales.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
+                  <td class="text-right" style="color: #dc2626;">$${cost.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
+                  <td class="text-right bold" style="color: #dc2626;">₩${Math.round(costKrw).toLocaleString()}</td>
+                  <td class="text-right bold" style="color: #16a34a;">$${margin.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
+                  <td class="text-center">${rate.toFixed(1)}%</td>
+                  <td class="text-center">${order.status}</td>
+                </tr>
+              `;
+            }).join("")}
+          </tbody>
+        </table>
+      </body>
+      </html>
+    `;
+
+    const blob = new Blob([htmlContent], { type: "application/msword;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `Sales_Cost_Ledger_${dateStr}.doc`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   // 필터링 적용된 발주 목록
   const filteredOrders = orders.filter(order => {
     // 1. 날짜 범위 필터
@@ -328,6 +431,15 @@ export default function SalesCostLedgerPage() {
         >
           <Download className="w-4 h-4" />
           {lang === "KO" ? "엑셀 다운로드" : "Excel Download"}
+        </Button>
+
+        {/* 워드 다운로드 버튼 */}
+        <Button 
+          onClick={exportToWord}
+          className="bg-blue-600 hover:bg-blue-700 text-white font-bold h-10 px-4 text-xs gap-1.5 flex items-center shrink-0 w-full lg:w-auto"
+        >
+          <FileText className="w-4 h-4" />
+          {lang === "KO" ? "워드 다운로드" : "Word Download"}
         </Button>
       </div>
 
