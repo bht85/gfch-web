@@ -157,7 +157,7 @@ let nanumGothicBase64Cache: string | null = null;
 
 async function getNanumGothicBase64(): Promise<string> {
   if (nanumGothicBase64Cache) return nanumGothicBase64Cache;
-  const fontUrl = "https://fonts.gstatic.com/s/nanumgothic/v23/PNggR5G7wG_vLw8v9u19IuFubV0e.ttf";
+  const fontUrl = "/NanumGothic-Regular.ttf";
   const response = await fetch(fontUrl);
   if (!response.ok) {
     throw new Error("Failed to fetch Korean font");
