@@ -16,6 +16,31 @@ import {
   Loader2, DollarSign, Calendar, Search, Eye, Coins, Scale, FileText, ArrowLeft, Download
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
+
+let nanumGothicBase64Cache: string | null = null;
+
+async function getNanumGothicBase64(): Promise<string> {
+  if (nanumGothicBase64Cache) return nanumGothicBase64Cache;
+  const fontUrl = "https://fonts.gstatic.com/s/nanumgothic/v23/PNggR5G7wG_vLw8v9u19IuFubV0e.ttf";
+  const response = await fetch(fontUrl);
+  if (!response.ok) {
+    throw new Error("Failed to fetch Korean font");
+  }
+  const blob = await response.blob();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64data = reader.result as string;
+      const base64 = base64data.split(",")[1];
+      nanumGothicBase64Cache = base64;
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
 
 export default function SalesCostLedgerPage() {
   const { user, loading: authLoading } = useAuth();
@@ -27,6 +52,7 @@ export default function SalesCostLedgerPage() {
   const [loading, setLoading] = useState(true);
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
   const [systemExchangeRate, setSystemExchangeRate] = useState(1340);
+  const [generatingPdf, setGeneratingPdf] = useState(false);
 
   // 필터 상태
   const [selectedPartnerId, setSelectedPartnerId] = useState("ALL");
@@ -180,107 +206,154 @@ export default function SalesCostLedgerPage() {
     XLSX.writeFile(workbook, `Sales_Cost_Ledger_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
-  // 워드(.doc) 다운로드 기능 (HTML을 Word가 읽을 수 있는 문서 형식으로 다운로드)
-  const exportToWord = () => {
-    const title = lang === "KO" ? "글로벌 매출/매입 대장 보고서" : "Global Sales & Cost Ledger Report";
-    const dateStr = new Date().toISOString().split('T')[0];
-    
-    const htmlContent = `
-      <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
-      <head>
-        <title>${title}</title>
-        <style>
-          body { font-family: 'Malgun Gothic', Arial, sans-serif; line-height: 1.6; padding: 20px; }
-          h1 { text-align: center; color: #1e3a8a; font-size: 24px; margin-bottom: 5px; }
-          .subtitle { text-align: center; color: #64748b; font-size: 12px; margin-bottom: 30px; }
-          .section-title { font-size: 16px; font-weight: bold; color: #0f172a; margin-top: 20px; margin-bottom: 10px; border-bottom: 2px solid #cbd5e1; padding-bottom: 5px; }
-          .summary-table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
-          .summary-table th, .summary-table td { border: 1px solid #cbd5e1; padding: 10px; text-align: center; font-size: 12px; }
-          .summary-table th { background-color: #f8fafc; font-weight: bold; color: #334155; }
-          .ledger-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-          .ledger-table th, .ledger-table td { border: 1px solid #cbd5e1; padding: 8px; text-align: left; font-size: 10px; }
-          .ledger-table th { background-color: #1e3a8a; color: #ffffff; font-weight: bold; text-align: center; }
-          .text-right { text-align: right; }
-          .text-center { text-align: center; }
-          .bold { font-weight: bold; }
-        </style>
-      </head>
-      <body>
-        <h1>${title}</h1>
-        <p class="subtitle">${lang === "KO" ? "출력 일자" : "Export Date"}: ${dateStr}</p>
-        
-        <div class="section-title">1. ${lang === "KO" ? "재무 요약 (Financial Summary)" : "Financial Summary"}</div>
-        <table class="summary-table">
-          <thead>
-            <tr>
-              <th>${lang === "KO" ? "총 매출액 (공급가)" : "Total Revenue"}</th>
-              <th>${lang === "KO" ? "총 매입액 (USD)" : "Total Cost (USD)"}</th>
-              <th>${lang === "KO" ? "총 매입액 (KRW)" : "Total Cost (KRW)"}</th>
-              <th>${lang === "KO" ? "총 마진액" : "Total Margin"}</th>
-              <th>${lang === "KO" ? "평균 마진율" : "Avg Margin %"}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td style="color: #2563eb; font-weight: bold; font-size: 14px;">$${totalSales.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
-              <td style="color: #dc2626; font-size: 14px;">$${totalCost.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
-              <td style="color: #dc2626; font-weight: bold; font-size: 14px;">₩${Math.round(totalCost * systemExchangeRate).toLocaleString()}</td>
-              <td style="color: #16a34a; font-weight: bold; font-size: 14px;">$${totalMargin.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
-              <td style="color: #7c3aed; font-weight: bold; font-size: 14px;">${marginRate.toFixed(2)}%</td>
-            </tr>
-          </tbody>
-        </table>
+  // PDF 보고서 다운로드 기능 (나눔고딕 한글 폰트 적용)
+  const exportToPDF = async () => {
+    setGeneratingPdf(true);
+    try {
+      const doc = new jsPDF();
+      
+      // 나눔고딕 한글 폰트 로드
+      try {
+        const fontBase64 = await getNanumGothicBase64();
+        doc.addFileToVFS("NanumGothic.ttf", fontBase64);
+        doc.addFont("NanumGothic.ttf", "NanumGothic", "normal");
+        doc.addFont("NanumGothic.ttf", "NanumGothic", "bold");
+        doc.setFont("NanumGothic", "normal");
+      } catch (error) {
+        console.error("Failed to load Korean font, using default font:", error);
+      }
+      
+      const dateStr = new Date().toISOString().split('T')[0];
+      const partnerName = selectedPartnerId === "ALL" 
+        ? (lang === "KO" ? "전체 파트너사" : "All Partners")
+        : (dbPartners.find(p => p.id === selectedPartnerId)?.name || selectedPartnerId);
 
-        <div class="section-title">2. ${lang === "KO" ? "발주별 상세 대장 내역 (Ledger Details)" : "Ledger Details"}</div>
-        <table class="ledger-table">
-          <thead>
-            <tr>
-              <th>${lang === "KO" ? "MF 파트너" : "Partner"}</th>
-              <th>${lang === "KO" ? "발주 번호 (PO)" : "PO Number"}</th>
-              <th>${lang === "KO" ? "일자" : "Date"}</th>
-              <th>${lang === "KO" ? "매출액 (USD)" : "Revenue (USD)"}</th>
-              <th>${lang === "KO" ? "매입액 (USD)" : "Cost (USD)"}</th>
-              <th>${lang === "KO" ? "매입액 (KRW)" : "Cost (KRW)"}</th>
-              <th>${lang === "KO" ? "마진액 (USD)" : "Margin (USD)"}</th>
-              <th>${lang === "KO" ? "마진율" : "Margin %"}</th>
-              <th>${lang === "KO" ? "진행 단계" : "Stage"}</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${filteredOrders.map(order => {
-              const sales = typeof order.totalAmount === "number" ? order.totalAmount : parseAmount(order.amount);
-              const cost = calculateOrderCost(order);
-              const costKrw = cost * systemExchangeRate;
-              const margin = sales - cost;
-              const rate = sales > 0 ? (margin / sales) * 100 : 0;
-              return `
-                <tr>
-                  <td class="bold">${order.partnerName || "MF Partner"}</td>
-                  <td style="font-family: monospace;">${order.id}</td>
-                  <td class="text-center">${order.date}</td>
-                  <td class="text-right bold" style="color: #2563eb;">$${sales.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
-                  <td class="text-right" style="color: #dc2626;">$${cost.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
-                  <td class="text-right bold" style="color: #dc2626;">₩${Math.round(costKrw).toLocaleString()}</td>
-                  <td class="text-right bold" style="color: #16a34a;">$${margin.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
-                  <td class="text-center">${rate.toFixed(1)}%</td>
-                  <td class="text-center">${order.status}</td>
-                </tr>
-              `;
-            }).join("")}
-          </tbody>
-        </table>
-      </body>
-      </html>
-    `;
+      // 1. 보고서 타이틀
+      doc.setFontSize(20);
+      doc.setTextColor(30, 41, 59); // Slate-800
+      doc.setFont("NanumGothic", "bold");
+      doc.text(lang === "KO" ? "글로벌 매출/매입 대장 보고서" : "Global Sales & Cost Ledger Report", 105, 20, { align: "center" });
+      
+      // 검색 조건 정보
+      doc.setFontSize(9);
+      doc.setTextColor(100, 116, 139); // Slate-500
+      doc.setFont("NanumGothic", "normal");
+      doc.text(`${lang === "KO" ? "조회 기간" : "Period"}: ${startDate} ~ ${endDate}  |  ${lang === "KO" ? "필터 파트너" : "Partner"}: ${partnerName}`, 105, 27, { align: "center" });
 
-    const blob = new Blob([htmlContent], { type: "application/msword;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute("download", `Sales_Cost_Ledger_${dateStr}.doc`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+      // 구분선
+      doc.setDrawColor(226, 232, 240);
+      doc.setLineWidth(0.5);
+      doc.line(14, 32, 196, 32);
+
+      // 2. 종합 재무 요약 테이블
+      doc.setFontSize(11);
+      doc.setTextColor(15, 23, 42); // Slate-900
+      doc.setFont("NanumGothic", "bold");
+      doc.text(lang === "KO" ? "1. 재무 요약 (Financial Summary)" : "1. Financial Summary", 14, 42);
+
+      const summaryHeaders = [
+        lang === "KO" ? "총 매출액 (USD)" : "Total Revenue (USD)",
+        lang === "KO" ? "총 매입액 (USD)" : "Total Cost (USD)",
+        lang === "KO" ? "총 매입액 (KRW)" : "Total Cost (KRW)",
+        lang === "KO" ? "본사 총 마진액" : "Total Margin",
+        lang === "KO" ? "평균 마진율" : "Avg Margin %"
+      ];
+
+      const summaryData = [[
+        `$${totalSales.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}`,
+        `$${totalCost.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}`,
+        `₩${Math.round(totalCost * systemExchangeRate).toLocaleString()}`,
+        `$${totalMargin.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}`,
+        `${marginRate.toFixed(2)}%`
+      ]];
+
+      autoTable(doc, {
+        startY: 46,
+        head: [summaryHeaders],
+        body: summaryData,
+        theme: 'grid',
+        headStyles: { fillColor: [71, 85, 105], textColor: 255, halign: 'center', fontStyle: 'bold' },
+        bodyStyles: { halign: 'center', fontStyle: 'bold', textColor: [30, 41, 59] },
+        styles: { font: "NanumGothic", fontSize: 9 }
+      });
+
+      // 3. 발주별 상세 대장 내역 테이블
+      const nextY = (doc as any).lastAutoTable.finalY + 12;
+      doc.setFontSize(11);
+      doc.setTextColor(15, 23, 42);
+      doc.setFont("NanumGothic", "bold");
+      doc.text(lang === "KO" ? "2. 발주별 상세 대장 내역 (Details)" : "2. Ledger Details", 14, nextY);
+
+      const tableHeaders = [
+        lang === "KO" ? "MF 파트너" : "Partner",
+        lang === "KO" ? "발주 번호" : "PO Number",
+        lang === "KO" ? "일자" : "Date",
+        lang === "KO" ? "매출액 (USD)" : "Revenue (USD)",
+        lang === "KO" ? "매입액 (USD)" : "Cost (USD)",
+        lang === "KO" ? "매입액 (KRW)" : "Cost (KRW)",
+        lang === "KO" ? "마진액 (USD)" : "Margin (USD)",
+        lang === "KO" ? "마진율" : "Margin %"
+      ];
+
+      const tableData = filteredOrders.map(order => {
+        const sales = typeof order.totalAmount === "number" ? order.totalAmount : parseAmount(order.amount);
+        const cost = calculateOrderCost(order);
+        const costKrw = cost * systemExchangeRate;
+        const margin = sales - cost;
+        const rate = sales > 0 ? (margin / sales) * 100 : 0;
+
+        return [
+          order.partnerName || "MF Partner",
+          order.id,
+          order.date,
+          `$${sales.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}`,
+          `$${cost.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}`,
+          `₩${Math.round(costKrw).toLocaleString()}`,
+          `$${margin.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}`,
+          `${rate.toFixed(1)}%`
+        ];
+      });
+
+      autoTable(doc, {
+        startY: nextY + 4,
+        head: [tableHeaders],
+        body: tableData,
+        foot: [[
+          lang === "KO" ? "합계 (TOTAL)" : "TOTAL",
+          "",
+          "",
+          `$${totalSales.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}`,
+          `$${totalCost.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}`,
+          `₩${Math.round(totalCost * systemExchangeRate).toLocaleString()}`,
+          `$${totalMargin.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}`,
+          `${marginRate.toFixed(1)}%`
+        ]],
+        theme: 'grid',
+        headStyles: { fillColor: [30, 41, 59], textColor: 255, halign: 'center', fontStyle: 'bold' },
+        footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'bold' },
+        columnStyles: {
+          3: { halign: 'right' },
+          4: { halign: 'right' },
+          5: { halign: 'right' },
+          6: { halign: 'right' },
+          7: { halign: 'center' }
+        },
+        styles: { font: "NanumGothic", fontSize: 8 }
+      });
+
+      // 하단 비고 알림
+      const finalY = (doc as any).lastAutoTable.finalY + 15;
+      doc.setFontSize(8);
+      doc.setTextColor(148, 163, 184); // Slate-400
+      doc.text(`※ ${lang === "KO" ? "본 보고서는 시스템 고정환율 기준이며 시스템에서 자동 생성된 전자 문서입니다." : "This report is generated based on the system fixed exchange rate."}`, 105, finalY, { align: "center" });
+
+      doc.save(`Sales_Cost_Ledger_Report_${dateStr}.pdf`);
+    } catch (err) {
+      console.error("Error exporting PDF:", err);
+      alert(lang === "KO" ? "PDF 보고서 생성 중 오류가 발생했습니다." : "Error generating PDF report.");
+    } finally {
+      setGeneratingPdf(false);
+    }
   };
 
   // 필터링 적용된 발주 목록
@@ -459,13 +532,18 @@ export default function SalesCostLedgerPage() {
           {lang === "KO" ? "엑셀 다운로드" : "Excel Download"}
         </Button>
 
-        {/* 워드 다운로드 버튼 */}
+        {/* PDF 보고서 다운로드 버튼 */}
         <Button 
-          onClick={exportToWord}
-          className="bg-blue-600 hover:bg-blue-700 text-white font-bold h-10 px-4 text-xs gap-1.5 flex items-center shrink-0 w-full lg:w-auto"
+          onClick={exportToPDF}
+          disabled={generatingPdf}
+          className="bg-rose-600 hover:bg-rose-700 text-white font-bold h-10 px-4 text-xs gap-1.5 flex items-center shrink-0 w-full lg:w-auto"
         >
-          <FileText className="w-4 h-4" />
-          {lang === "KO" ? "워드 다운로드" : "Word Download"}
+          {generatingPdf ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <FileText className="w-4 h-4" />
+          )}
+          {lang === "KO" ? "PDF 보고서 다운로드" : "PDF Report Download"}
         </Button>
       </div>
 
