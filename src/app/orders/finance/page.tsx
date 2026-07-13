@@ -68,6 +68,7 @@ export default function FinancePage() {
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      console.log("Finance Page Raw Orders:", data.map(o => ({ id: o.id, status: o.status, paymentStatus: o.paymentStatus, mf: o.mf || o.partnerName })));
       const sortedData = data.sort((a: any, b: any) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
       setOrders(sortedData);
       setLoading(false);
