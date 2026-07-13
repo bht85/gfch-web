@@ -88,9 +88,28 @@ export default function SalesCostLedgerPage() {
     return revenue * 0.7; // 폴백
   };
 
-  // 엑셀(CSV) 다운로드 기능
-  const exportToExcel = () => {
-    const BOM = "\uFEFF";
+  // 엑셀(.xlsx) 다운로드 기능 (SheetJS 동적 로드)
+  const exportToExcel = async () => {
+    // 1. SheetJS 라이브러리 동적 로드
+    if (!(window as any).XLSX) {
+      try {
+        const script = document.createElement("script");
+        script.src = "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js";
+        document.body.appendChild(script);
+        await new Promise((resolve, reject) => {
+          script.onload = resolve;
+          script.onerror = () => reject(new Error("Failed to load SheetJS from CDN"));
+        });
+      } catch (err) {
+        console.error(err);
+        alert(lang === "KO" ? "엑셀 라이브러리를 불러오지 못했습니다. 네트워크 상태를 확인해 주세요." : "Failed to load Excel library. Please check your network connection.");
+        return;
+      }
+    }
+
+    const XLSX = (window as any).XLSX;
+
+    // 2. 데이터 가공
     const headers = [
       lang === "KO" ? "MF 파트너" : "Partner",
       lang === "KO" ? "발주 번호" : "PO Number",
@@ -112,15 +131,15 @@ export default function SalesCostLedgerPage() {
       const rate = sales > 0 ? (margin / sales) * 100 : 0;
 
       return [
-        `"${order.partnerName || 'MF Partner'}"`,
-        `"${order.id}"`,
-        `"${order.date}"`,
-        `"${order.status}"`,
-        `"${order.paymentStatus}"`,
-        sales.toFixed(2),
-        cost.toFixed(2),
+        order.partnerName || 'MF Partner',
+        order.id,
+        order.date,
+        order.status,
+        order.paymentStatus,
+        sales,
+        cost,
         Math.round(costKrw),
-        margin.toFixed(2),
+        margin,
         `${rate.toFixed(1)}%`
       ];
     });
@@ -131,27 +150,34 @@ export default function SalesCostLedgerPage() {
     const avgMarginRate = totalSales > 0 ? (totalMargin / totalSales) * 100 : 0;
 
     rows.push([
-      `"${lang === 'KO' ? '합계' : 'TOTAL'}"`,
-      `""`,
-      `""`,
-      `""`,
-      `""`,
-      totalSales.toFixed(2),
-      totalCost.toFixed(2),
+      lang === 'KO' ? '합계' : 'TOTAL',
+      "",
+      "",
+      "",
+      "",
+      totalSales,
+      totalCost,
       Math.round(totalCost * systemExchangeRate),
-      totalMargin.toFixed(2),
+      totalMargin,
       `${avgMarginRate.toFixed(1)}%`
     ]);
 
-    const csvContent = BOM + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute("download", `Sales_Cost_Ledger_${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    // 3. Sheet 생성
+    const sheetData = [headers, ...rows];
+    const worksheet = XLSX.utils.aoa_to_sheet(sheetData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Ledger");
+
+    // 열 너비 조절
+    const maxCols = headers.length;
+    const wscols = [];
+    for (let i = 0; i < maxCols; i++) {
+      wscols.push({ wch: 18 }); // 기본 너비 18
+    }
+    worksheet["!cols"] = wscols;
+
+    // 4. 파일 다운로드 (.xlsx 확장자로 저장)
+    XLSX.writeFile(workbook, `Sales_Cost_Ledger_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
   // 워드(.doc) 다운로드 기능 (HTML을 Word가 읽을 수 있는 문서 형식으로 다운로드)
