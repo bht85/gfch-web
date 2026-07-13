@@ -5,7 +5,7 @@ import { useAuth } from "@/lib/auth";
 import { useTranslation } from "@/lib/i18n";
 import { useRouter } from "next/navigation";
 import { db } from "@/lib/firebase";
-import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
+import { collection, onSnapshot, query, orderBy, doc } from "firebase/firestore";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { 
-  Loader2, DollarSign, Calendar, Search, Eye, Coins, Scale, FileText, ArrowLeft 
+  Loader2, DollarSign, Calendar, Search, Eye, Coins, Scale, FileText, ArrowLeft, Download
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -26,6 +26,7 @@ export default function SalesCostLedgerPage() {
   const [dbPartners, setDbPartners] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
+  const [systemExchangeRate, setSystemExchangeRate] = useState(1340);
 
   // 필터 상태
   const [selectedPartnerId, setSelectedPartnerId] = useState("ALL");
@@ -55,9 +56,17 @@ export default function SalesCostLedgerPage() {
       setDbPartners(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
 
+    const unsubRate = onSnapshot(doc(db, "system", "config"), (docSnap: any) => {
+      if (docSnap.exists()) {
+        const rate = docSnap.data().exchangeRate || 1340;
+        setSystemExchangeRate(Number(rate));
+      }
+    });
+
     return () => {
       unsubOrders();
       unsubPartners();
+      unsubRate();
     };
   }, []);
 
@@ -77,6 +86,72 @@ export default function SalesCostLedgerPage() {
     }
     const revenue = typeof order.totalAmount === "number" ? order.totalAmount : parseAmount(order.amount);
     return revenue * 0.7; // 폴백
+  };
+
+  // 엑셀(CSV) 다운로드 기능
+  const exportToExcel = () => {
+    const BOM = "\uFEFF";
+    const headers = [
+      lang === "KO" ? "MF 파트너" : "Partner",
+      lang === "KO" ? "발주 번호" : "PO Number",
+      lang === "KO" ? "일자" : "Date",
+      lang === "KO" ? "진행 단계" : "Stage",
+      lang === "KO" ? "결제 상태" : "Payment Status",
+      lang === "KO" ? "매출액 (USD)" : "Revenue (USD)",
+      lang === "KO" ? "매입액 (USD)" : "Cost (USD)",
+      lang === "KO" ? "매입액 (KRW)" : "Cost (KRW)",
+      lang === "KO" ? "마진액 (USD)" : "Margin (USD)",
+      lang === "KO" ? "마진율 (%)" : "Margin Rate (%)"
+    ];
+
+    const rows = filteredOrders.map(order => {
+      const sales = typeof order.totalAmount === "number" ? order.totalAmount : parseAmount(order.amount);
+      const cost = calculateOrderCost(order);
+      const costKrw = cost * systemExchangeRate;
+      const margin = sales - cost;
+      const rate = sales > 0 ? (margin / sales) * 100 : 0;
+
+      return [
+        `"${order.partnerName || 'MF Partner'}"`,
+        `"${order.id}"`,
+        `"${order.date}"`,
+        `"${order.status}"`,
+        `"${order.paymentStatus}"`,
+        sales.toFixed(2),
+        cost.toFixed(2),
+        Math.round(costKrw),
+        margin.toFixed(2),
+        `${rate.toFixed(1)}%`
+      ];
+    });
+
+    const totalSales = filteredOrders.reduce((sum, order) => sum + (typeof order.totalAmount === "number" ? order.totalAmount : parseAmount(order.amount)), 0);
+    const totalCost = filteredOrders.reduce((sum, order) => sum + calculateOrderCost(order), 0);
+    const totalMargin = totalSales - totalCost;
+    const avgMarginRate = totalSales > 0 ? (totalMargin / totalSales) * 100 : 0;
+
+    rows.push([
+      `"${lang === 'KO' ? '합계' : 'TOTAL'}"`,
+      `""`,
+      `""`,
+      `""`,
+      `""`,
+      totalSales.toFixed(2),
+      totalCost.toFixed(2),
+      Math.round(totalCost * systemExchangeRate),
+      totalMargin.toFixed(2),
+      `${avgMarginRate.toFixed(1)}%`
+    ]);
+
+    const csvContent = BOM + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `Sales_Cost_Ledger_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   // 필터링 적용된 발주 목록
@@ -161,8 +236,8 @@ export default function SalesCostLedgerPage() {
             <div className="text-2xl font-black font-mono text-rose-600">
               ${totalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </div>
-            <p className="text-[10px] text-muted-foreground mt-1">
-              {lang === "KO" ? "제품 실제 공급 원가" : "Actual logistics true cost"}
+            <p className="text-[10px] text-rose-700 font-bold mt-1">
+              ₩{Math.round(totalCost * systemExchangeRate).toLocaleString()} ({lang === "KO" ? `적용 환율: ${systemExchangeRate}원` : `Rate: ₩${systemExchangeRate}`})
             </p>
           </CardContent>
         </Card>
@@ -245,6 +320,15 @@ export default function SalesCostLedgerPage() {
             className="pl-9 h-10 text-xs"
           />
         </div>
+
+        {/* 엑셀 다운로드 버튼 */}
+        <Button 
+          onClick={exportToExcel}
+          className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold h-10 px-4 text-xs gap-1.5 flex items-center shrink-0 w-full lg:w-auto"
+        >
+          <Download className="w-4 h-4" />
+          {lang === "KO" ? "엑셀 다운로드" : "Excel Download"}
+        </Button>
       </div>
 
       {/* 테이블 대장 */}
@@ -256,7 +340,7 @@ export default function SalesCostLedgerPage() {
               <TableHead className="w-[180px]">{lang === "KO" ? "발주 번호 (PO)" : "PO Number"}</TableHead>
               <TableHead>{lang === "KO" ? "일자" : "Date"}</TableHead>
               <TableHead className="text-right text-blue-700">{lang === "KO" ? "매출액 (공급가)" : "Revenue"}</TableHead>
-              <TableHead className="text-right text-rose-600">{lang === "KO" ? "매입액 (원가)" : "Purchase (Cost)"}</TableHead>
+              <TableHead className="text-right text-rose-600">{lang === "KO" ? "매입액 (원화/달러)" : "Purchase (Cost)"}</TableHead>
               <TableHead className="text-right text-emerald-700 font-bold">{lang === "KO" ? "마진 (당사수익)" : "Margin"}</TableHead>
               <TableHead className="text-center">{lang === "KO" ? "마진율" : "Margin %"}</TableHead>
               <TableHead className="text-center">{lang === "KO" ? "진행 단계" : "Stage"}</TableHead>
@@ -293,8 +377,9 @@ export default function SalesCostLedgerPage() {
                   <TableCell className="text-right font-bold text-blue-600 font-mono text-xs">
                     ${sales.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </TableCell>
-                  <TableCell className="text-right font-medium text-rose-500 font-mono text-xs">
-                    ${cost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  <TableCell className="text-right font-medium text-rose-500 font-mono text-xs leading-tight">
+                    <div>${cost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                    <div className="text-[10px] text-rose-455 font-semibold mt-0.5">₩{Math.round(cost * systemExchangeRate).toLocaleString()}</div>
                   </TableCell>
                   <TableCell className="text-right font-black text-emerald-600 font-mono text-xs">
                     ${margin.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -377,9 +462,9 @@ export default function SalesCostLedgerPage() {
                       <TableHead>{lang === "KO" ? "제품명" : "Product Name"}</TableHead>
                       <TableHead className="text-center">{lang === "KO" ? "수량" : "Qty"}</TableHead>
                       <TableHead className="text-right text-blue-700">{lang === "KO" ? "공급 단가" : "Unit Price"}</TableHead>
-                      <TableHead className="text-right text-rose-600">{lang === "KO" ? "원가 단가" : "Cost Price"}</TableHead>
+                      <TableHead className="text-right text-rose-600">{lang === "KO" ? "원가 단가 (원화/달러)" : "Cost Price"}</TableHead>
                       <TableHead className="text-right text-blue-700">{lang === "KO" ? "매출 합계" : "Sales Sum"}</TableHead>
-                      <TableHead className="text-right text-rose-600">{lang === "KO" ? "원가 합계" : "Cost Sum"}</TableHead>
+                      <TableHead className="text-right text-rose-600">{lang === "KO" ? "원가 합계 (원화/달러)" : "Cost Sum"}</TableHead>
                       <TableHead className="text-right text-emerald-700 font-bold">{lang === "KO" ? "마진액" : "Margin"}</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -402,12 +487,16 @@ export default function SalesCostLedgerPage() {
                             {qty.toLocaleString()}
                           </TableCell>
                           <TableCell className="text-right font-mono text-blue-600">${price.toFixed(2)}</TableCell>
-                          <TableCell className="text-right font-mono text-rose-500">${cost.toFixed(2)}</TableCell>
+                          <TableCell className="text-right font-mono text-rose-500 leading-tight">
+                            <div>${cost.toFixed(2)}</div>
+                            <div className="text-[9px] text-rose-455 mt-0.5">₩{Math.round(cost * systemExchangeRate).toLocaleString()}</div>
+                          </TableCell>
                           <TableCell className="text-right font-mono font-bold text-blue-600">
                             ${salesSum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </TableCell>
-                          <TableCell className="text-right font-mono font-medium text-rose-500">
-                            ${costSum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          <TableCell className="text-right font-mono font-medium text-rose-500 leading-tight">
+                            <div>${costSum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                            <div className="text-[9px] text-rose-455 mt-0.5">₩{Math.round(costSum * systemExchangeRate).toLocaleString()}</div>
                           </TableCell>
                           <TableCell className="text-right font-mono font-black text-emerald-600">
                             ${itemMargin.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -440,6 +529,20 @@ export default function SalesCostLedgerPage() {
                     </span>
                   </div>
                   <div className="flex justify-between md:justify-end gap-6 items-center border-t border-dashed pt-1 mt-1">
+                    <span className="text-slate-500 font-bold">{lang === "KO" ? "총 매입액 (원가):" : "Total Cost:"}</span>
+                    {(() => {
+                      const cost = calculateOrderCost(selectedOrder);
+                      return (
+                        <span className="font-mono font-semibold text-rose-500 text-sm">
+                          ${cost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          <span className="text-[10px] text-rose-500 bg-rose-50 px-1 py-0.5 rounded font-bold ml-1.5">
+                            ₩{Math.round(cost * systemExchangeRate).toLocaleString()}
+                          </span>
+                        </span>
+                      );
+                    })()}
+                  </div>
+                  <div className="flex justify-between md:justify-end gap-6 items-center border-t border-solid pt-1 mt-1">
                     <span className="text-slate-500 font-bold">{lang === "KO" ? "본사 마진액:" : "HQ Net Profit:"}</span>
                     {(() => {
                       const sales = parseAmount(selectedOrder.amount);
