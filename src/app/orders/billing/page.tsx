@@ -53,6 +53,7 @@ export default function SalesCostLedgerPage() {
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
   const [systemExchangeRate, setSystemExchangeRate] = useState(1340);
   const [generatingPdf, setGeneratingPdf] = useState(false);
+  const [previewPdfUrl, setPreviewPdfUrl] = useState<string | null>(null);
 
   // 필터 상태
   const [selectedPartnerId, setSelectedPartnerId] = useState("ALL");
@@ -206,7 +207,7 @@ export default function SalesCostLedgerPage() {
     XLSX.writeFile(workbook, `Sales_Cost_Ledger_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
-  // PDF 보고서 다운로드 기능 (나눔고딕 한글 폰트 적용)
+  // PDF 보고서 미리보기 기능 (나눔고딕 한글 폰트 및 normal 서식 고정으로 깨짐 완전 방지)
   const exportToPDF = async () => {
     setGeneratingPdf(true);
     try {
@@ -217,7 +218,6 @@ export default function SalesCostLedgerPage() {
         const fontBase64 = await getNanumGothicBase64();
         doc.addFileToVFS("NanumGothic.ttf", fontBase64);
         doc.addFont("NanumGothic.ttf", "NanumGothic", "normal");
-        doc.addFont("NanumGothic.ttf", "NanumGothic", "bold");
         doc.setFont("NanumGothic", "normal");
       } catch (error) {
         console.error("Failed to load Korean font, using default font:", error);
@@ -228,10 +228,10 @@ export default function SalesCostLedgerPage() {
         ? (lang === "KO" ? "전체 파트너사" : "All Partners")
         : (dbPartners.find(p => p.id === selectedPartnerId)?.name || selectedPartnerId);
 
-      // 1. 보고서 타이틀
+      // 1. 보고서 타이틀 (Bold 대신 fontStyle 'normal'로 깨짐 방지)
       doc.setFontSize(20);
       doc.setTextColor(30, 41, 59); // Slate-800
-      doc.setFont("NanumGothic", "bold");
+      doc.setFont("NanumGothic", "normal");
       doc.text(lang === "KO" ? "글로벌 매출/매입 대장 보고서" : "Global Sales & Cost Ledger Report", 105, 20, { align: "center" });
       
       // 검색 조건 정보
@@ -245,10 +245,10 @@ export default function SalesCostLedgerPage() {
       doc.setLineWidth(0.5);
       doc.line(14, 32, 196, 32);
 
-      // 2. 종합 재무 요약 테이블
+      // 2. 종합 재무 요약 테이블 (모든 글꼴 서식을 normal로 고정하여 한글 깨짐 방지)
       doc.setFontSize(11);
       doc.setTextColor(15, 23, 42); // Slate-900
-      doc.setFont("NanumGothic", "bold");
+      doc.setFont("NanumGothic", "normal");
       doc.text(lang === "KO" ? "1. 재무 요약 (Financial Summary)" : "1. Financial Summary", 14, 42);
 
       const summaryHeaders = [
@@ -272,16 +272,16 @@ export default function SalesCostLedgerPage() {
         head: [summaryHeaders],
         body: summaryData,
         theme: 'grid',
-        headStyles: { fillColor: [71, 85, 105], textColor: 255, halign: 'center', fontStyle: 'bold' },
-        bodyStyles: { halign: 'center', fontStyle: 'bold', textColor: [30, 41, 59] },
-        styles: { font: "NanumGothic", fontSize: 9 }
+        headStyles: { fillColor: [71, 85, 105], textColor: 255, halign: 'center', fontStyle: 'normal' },
+        bodyStyles: { halign: 'center', fontStyle: 'normal', textColor: [30, 41, 59] },
+        styles: { font: "NanumGothic", fontSize: 9, fontStyle: 'normal' }
       });
 
-      // 3. 발주별 상세 대장 내역 테이블
+      // 3. 발주별 상세 대장 내역 테이블 (모든 글꼴 서식을 normal로 고정하여 한글 깨짐 방지)
       const nextY = (doc as any).lastAutoTable.finalY + 12;
       doc.setFontSize(11);
       doc.setTextColor(15, 23, 42);
-      doc.setFont("NanumGothic", "bold");
+      doc.setFont("NanumGothic", "normal");
       doc.text(lang === "KO" ? "2. 발주별 상세 대장 내역 (Details)" : "2. Ledger Details", 14, nextY);
 
       const tableHeaders = [
@@ -329,8 +329,8 @@ export default function SalesCostLedgerPage() {
           `${marginRate.toFixed(1)}%`
         ]],
         theme: 'grid',
-        headStyles: { fillColor: [30, 41, 59], textColor: 255, halign: 'center', fontStyle: 'bold' },
-        footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'bold' },
+        headStyles: { fillColor: [30, 41, 59], textColor: 255, halign: 'center', fontStyle: 'normal' },
+        footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'normal' },
         columnStyles: {
           3: { halign: 'right' },
           4: { halign: 'right' },
@@ -338,16 +338,19 @@ export default function SalesCostLedgerPage() {
           6: { halign: 'right' },
           7: { halign: 'center' }
         },
-        styles: { font: "NanumGothic", fontSize: 8 }
+        styles: { font: "NanumGothic", fontSize: 8, fontStyle: 'normal' }
       });
 
       // 하단 비고 알림
       const finalY = (doc as any).lastAutoTable.finalY + 15;
       doc.setFontSize(8);
       doc.setTextColor(148, 163, 184); // Slate-400
+      doc.setFont("NanumGothic", "normal");
       doc.text(`※ ${lang === "KO" ? "본 보고서는 시스템 고정환율 기준이며 시스템에서 자동 생성된 전자 문서입니다." : "This report is generated based on the system fixed exchange rate."}`, 105, finalY, { align: "center" });
 
-      doc.save(`Sales_Cost_Ledger_Report_${dateStr}.pdf`);
+      const pdfBlob = doc.output("blob");
+      const blobUrl = URL.createObjectURL(pdfBlob);
+      setPreviewPdfUrl(blobUrl);
     } catch (err) {
       console.error("Error exporting PDF:", err);
       alert(lang === "KO" ? "PDF 보고서 생성 중 오류가 발생했습니다." : "Error generating PDF report.");
@@ -784,6 +787,52 @@ export default function SalesCostLedgerPage() {
                   <p>{selectedOrder.notes}</p>
                 </div>
               )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* PDF 보고서 미리보기 모달 */}
+      <Dialog open={!!previewPdfUrl} onOpenChange={(open) => !open && setPreviewPdfUrl(null)}>
+        <DialogContent className="sm:max-w-none max-w-[1600px] w-[95vw] h-[90vh] flex flex-col p-4">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-xl font-bold">
+              <FileText className="w-5 h-5 text-rose-500" />
+              {lang === "KO" ? "글로벌 매출/매입 대장 PDF 보고서 미리보기" : "PDF Report Preview"}
+            </DialogTitle>
+          </DialogHeader>
+
+          {previewPdfUrl && (
+            <div className="flex-1 flex flex-col space-y-4 overflow-hidden mt-2">
+              <div className="flex-1 border rounded-lg overflow-hidden bg-muted/20">
+                <iframe 
+                  src={previewPdfUrl} 
+                  className="w-full h-full"
+                  title="PDF Preview"
+                />
+              </div>
+              
+              <div className="flex justify-end gap-2 pt-2 border-t">
+                <Button 
+                  variant="outline" 
+                  onClick={() => setPreviewPdfUrl(null)}
+                  className="h-10 text-xs px-4"
+                >
+                  {lang === "KO" ? "닫기" : "Close"}
+                </Button>
+                <Button 
+                  onClick={() => {
+                    const link = document.createElement("a");
+                    link.href = previewPdfUrl;
+                    link.download = `Sales_Cost_Ledger_Report_${new Date().toISOString().split('T')[0]}.pdf`;
+                    link.click();
+                  }}
+                  className="bg-rose-600 hover:bg-rose-700 text-white font-bold h-10 px-4 text-xs gap-1.5 flex items-center"
+                >
+                  <Download className="w-4 h-4" />
+                  {lang === "KO" ? "PDF 다운로드" : "Download PDF"}
+                </Button>
+              </div>
             </div>
           )}
         </DialogContent>
