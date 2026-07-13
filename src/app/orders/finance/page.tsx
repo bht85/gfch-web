@@ -177,7 +177,7 @@ export default function FinancePage() {
   };
 
   const pendingOrders = orders.filter(o => o.status === "PAYMENT_PENDING");
-  const approvedOrders = orders.filter(o => o.paymentStatus === "PAID");
+  const approvedOrders = orders.filter(o => o.paymentStatus === "PAID" || ["PREPARING", "SHIPPING", "DELIVERED", "COMPLETED"].includes(o.status));
   const displayOrders = activeTab === "pending" ? pendingOrders : approvedOrders;
 
   const filteredOrders = displayOrders.filter(o => 
